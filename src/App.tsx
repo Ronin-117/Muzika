@@ -93,7 +93,7 @@ function MuzikaApp() {
         className={`transition-all duration-300 ${
           isPlayerOpen && playerMode === 'video'
             ? 'fixed top-16 left-1/2 -translate-x-1/2 w-[90vw] max-w-sm h-56 rounded-2xl shadow-2xl z-50 border border-white/20 bg-black overflow-hidden'
-            : 'fixed top-0 left-0 w-1 h-1 opacity-[0.01] pointer-events-none z-0 overflow-hidden'
+            : 'fixed -left-[9999px] top-0 w-64 h-36 pointer-events-none'
         }`}
       >
         <div id="muzika-yt-embed" className="w-full h-full" />

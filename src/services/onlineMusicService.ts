@@ -31,9 +31,8 @@ export class OnlineMusicService {
             artist: item.artist,
             duration: item.duration || 210, // Complete song duration from 0:00 to end
             thumbnailUrl: item.thumbnailUrl,
-            source: 'stream' as const,
+            source: 'youtube' as const,
             youtubeId: item.youtubeId,
-            streamUrl: item.streamUrl || `/api/stream?id=${item.youtubeId}`,
             playCount: item.playCount || 0,
           }));
 
@@ -196,10 +195,9 @@ export class OnlineMusicService {
         : null);
 
     if (ytId && /^[a-zA-Z0-9_-]{11}$/.test(ytId)) {
-      const streamUrl = `/api/stream?id=${ytId}`;
       song.youtubeId = ytId;
-      song.streamUrl = streamUrl;
-      return streamUrl;
+      song.source = 'youtube';
+      return undefined;
     }
 
     // 2. If already has a full-length direct audio stream or local blob, keep it
@@ -217,10 +215,9 @@ export class OnlineMusicService {
         const hit = results?.[0];
         if (hit && hit.youtubeId) {
           song.youtubeId = hit.youtubeId;
+          song.source = 'youtube';
           if (hit.duration > 30) song.duration = hit.duration;
-          const fullAudioStream = `/api/stream?id=${hit.youtubeId}`;
-          song.streamUrl = fullAudioStream;
-          return fullAudioStream;
+          return undefined;
         }
       }
     } catch {

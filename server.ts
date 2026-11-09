@@ -12,6 +12,13 @@ const isProd = process.env.NODE_ENV === 'production';
 
 app.use(express.json());
 
+// Silence verbose [YOUTUBEJS] internal parser warnings in production logs
+const origWarn = console.warn;
+console.warn = (...args: any[]) => {
+  if (typeof args[0] === 'string' && args[0].includes('[YOUTUBEJS]')) return;
+  origWarn(...args);
+};
+
 // In-memory cache for search queries and stream metadata
 const searchCache = new Map<string, { data: any[]; timestamp: number }>();
 const streamCache = new Map<string, { url: string; mimeType: string; timestamp: number }>();
@@ -192,12 +199,11 @@ app.get('/api/stream', async (req: Request, res: Response) => {
       }
     }
 
-    // Fallback: If external direct audio stream is blocked by YouTube's rate limiting,
-    // redirect to high-resolution web stream
-    return res.redirect(302, `https://www.youtube.com/watch?v=${vidId}`);
+    // Return 404 so client cleanly uses the official YouTube engine instead of crashing on a redirected webpage
+    return res.status(404).json({ error: 'Direct audio stream not available, use official player' });
   } catch (err: any) {
     console.error('Error in /api/stream:', err?.message || err);
-    return res.status(500).send('Stream resolution failed');
+    return res.status(500).json({ error: 'Stream resolution failed' });
   }
 });
 
