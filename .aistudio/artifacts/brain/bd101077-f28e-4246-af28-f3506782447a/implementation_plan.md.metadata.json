@@ -1,0 +1,6 @@
+{
+  "summary":  "Implementation plan to resolve the 30-second preview limit and enable guaranteed full-length background & screen-off playback via an Express server-side audio stream proxy, multi-source stream resolver, and full-song IndexedDB caching.",
+  "updatedAt":  "2026-11-07T09:04:40.129287208Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

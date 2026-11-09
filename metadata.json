@@ -1,0 +1,6 @@
+{
+  "name": "Muzika",
+  "description": "Mobile-first open-source music player built on top of RiPlay architecture. Seamless YouTube stream & local playback, synced LRCLIB lyrics, equalizer, smart queues, and sleek AMOLED themes.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

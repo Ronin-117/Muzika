@@ -1,0 +1,222 @@
+import React, { useState } from 'react';
+import { useMusic } from '../../context/MusicContext';
+import {
+  Play,
+  Shuffle,
+  ArrowLeft,
+  Trash2,
+  Clock,
+  Music,
+  CheckCircle2,
+  DownloadCloud,
+} from 'lucide-react';
+
+export const PlaylistDetailModal: React.FC = () => {
+  const {
+    selectedPlaylist,
+    setSelectedPlaylist,
+    playSong,
+    removeFromPlaylist,
+    themeColors,
+    hapticFeedback,
+    isSongCached,
+    cacheSong,
+    removeCachedSong,
+  } = useMusic();
+
+  const [onlyOffline, setOnlyOffline] = useState(false);
+
+  if (!selectedPlaylist) return null;
+
+  const totalDuration = selectedPlaylist.songs.reduce((acc, s) => acc + (s.duration || 0), 0);
+  const totalMins = Math.floor(totalDuration / 60);
+
+  const cachedSongsInPlaylist = selectedPlaylist.songs.filter((s) => isSongCached(s.id));
+  const displayedSongs = onlyOffline ? cachedSongsInPlaylist : selectedPlaylist.songs;
+
+  const handlePlayAll = (shuffle = false, cachedOnly = false) => {
+    hapticFeedback();
+    const listToPlay = cachedOnly ? cachedSongsInPlaylist : selectedPlaylist.songs;
+    if (listToPlay.length === 0) return;
+    const list = shuffle ? [...listToPlay].sort(() => Math.random() - 0.5) : listToPlay;
+    playSong(list[0], list);
+  };
+
+  const handleToggleCache = async (song: any) => {
+    hapticFeedback();
+    if (isSongCached(song.id)) {
+      await removeCachedSong(song.id);
+    } else {
+      await cacheSong(song);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-40 flex flex-col overflow-y-auto animate-in slide-in-from-right duration-200 pb-44"
+      style={{ backgroundColor: themeColors.background0, color: themeColors.text }}
+    >
+      {/* Top Bar */}
+      <div className="sticky top-0 z-10 px-4 py-3 flex items-center gap-3 backdrop-blur-md border-b border-white/5">
+        <button
+          onClick={() => {
+            hapticFeedback();
+            setSelectedPlaylist(null);
+          }}
+          className="p-2 rounded-full hover:bg-white/10 transition"
+        >
+          <ArrowLeft className="w-5 h-5" />
+        </button>
+        <span className="text-sm font-bold truncate">Playlist</span>
+      </div>
+
+      <div className="px-4 max-w-md mx-auto w-full pt-4 space-y-5">
+        {/* Playlist Hero */}
+        <div className="flex flex-col items-center text-center space-y-3">
+          <div className="w-44 h-44 rounded-3xl overflow-hidden shadow-2xl border border-white/10">
+            <img
+              src={selectedPlaylist.coverUrl || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=600&auto=format&fit=crop&q=80'}
+              alt={selectedPlaylist.title}
+              className="w-full h-full object-cover"
+            />
+          </div>
+          <div>
+            <h1 className="text-xl font-black">{selectedPlaylist.title}</h1>
+            {selectedPlaylist.description && (
+              <p className="text-xs opacity-60 mt-1 max-w-xs">{selectedPlaylist.description}</p>
+            )}
+            <div className="flex items-center justify-center gap-2 text-xs opacity-60 mt-1.5 font-medium">
+              <span>{selectedPlaylist.songs.length} songs</span>
+              <span>•</span>
+              <span className="flex items-center gap-1 text-emerald-400 font-semibold">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                {cachedSongsInPlaylist.length} cached offline
+              </span>
+              <span>•</span>
+              <span className="flex items-center gap-1 opacity-60">
+                <Clock className="w-3 h-3" /> {totalMins} min
+              </span>
+            </div>
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
+            <button
+              onClick={() => handlePlayAll(false, false)}
+              disabled={selectedPlaylist.songs.length === 0}
+              className="px-5 py-2.5 rounded-full text-white font-bold text-xs flex items-center gap-2 shadow-lg transition active:scale-95 disabled:opacity-40"
+              style={{ backgroundColor: themeColors.accent }}
+            >
+              <Play className="w-4 h-4 fill-white" /> Play
+            </button>
+            <button
+              onClick={() => handlePlayAll(true, false)}
+              disabled={selectedPlaylist.songs.length === 0}
+              className="px-4 py-2.5 rounded-full bg-white/10 hover:bg-white/15 text-white font-bold text-xs flex items-center gap-2 transition active:scale-95 disabled:opacity-40"
+            >
+              <Shuffle className="w-4 h-4" /> Shuffle
+            </button>
+            {cachedSongsInPlaylist.length > 0 && (
+              <button
+                onClick={() => handlePlayAll(false, true)}
+                className="px-4 py-2.5 rounded-full bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 font-bold text-xs flex items-center gap-1.5 transition active:scale-95 border border-emerald-500/30"
+              >
+                <CheckCircle2 className="w-4 h-4" /> Play Cached Only ({cachedSongsInPlaylist.length})
+              </button>
+            )}
+          </div>
+
+          {/* Offline filter toggle chips */}
+          <div className="flex items-center gap-2 pt-1">
+            <button
+              onClick={() => setOnlyOffline(false)}
+              className={`px-3 py-1 rounded-xl text-xs font-semibold transition ${
+                !onlyOffline ? 'bg-white/20 text-white' : 'bg-white/5 text-white/50 hover:bg-white/10'
+              }`}
+            >
+              All Tracks ({selectedPlaylist.songs.length})
+            </button>
+            <button
+              onClick={() => setOnlyOffline(true)}
+              className={`px-3 py-1 rounded-xl text-xs font-semibold transition flex items-center gap-1 ${
+                onlyOffline ? 'bg-emerald-500 text-white' : 'bg-white/5 text-emerald-400 hover:bg-white/10'
+              }`}
+            >
+              <CheckCircle2 className="w-3 h-3" /> Offline Cached ({cachedSongsInPlaylist.length})
+            </button>
+          </div>
+        </div>
+
+        {/* Song List */}
+        <div className="space-y-1.5 pt-4 border-t border-white/5">
+          {displayedSongs.length === 0 ? (
+            <div className="p-8 text-center text-xs opacity-40 bg-white/5 rounded-2xl flex flex-col items-center">
+              <Music className="w-8 h-8 mb-2 opacity-30" />
+              {onlyOffline
+                ? 'No cached offline songs in this playlist yet. Tap the download icon next to any song to save it for offline listening.'
+                : 'This playlist is currently empty. Add tracks from Search or Home.'}
+            </div>
+          ) : (
+            displayedSongs.map((song, idx) => {
+              const cached = isSongCached(song.id);
+              return (
+                <div
+                  key={`${song.id}-${idx}`}
+                  onClick={() => {
+                    hapticFeedback();
+                    playSong(song, displayedSongs);
+                  }}
+                  className="flex items-center justify-between p-2.5 rounded-2xl bg-white/5 hover:bg-white/10 transition cursor-pointer group"
+                >
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <span className="text-xs font-mono opacity-40 w-4 text-center">{idx + 1}</span>
+                    <div className="relative w-10 h-10 rounded-lg overflow-hidden shrink-0">
+                      <img src={song.thumbnailUrl} alt={song.title} className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
+                        <Play className="w-4 h-4 fill-white" />
+                      </div>
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <div className="text-sm font-semibold truncate leading-tight">{song.title}</div>
+                        {cached && (
+                          <span className="shrink-0 flex items-center gap-0.5 text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded">
+                            <CheckCircle2 className="w-2.5 h-2.5" /> Offline
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs opacity-60 truncate">{song.artist}</div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                    {/* Toggle Cache Button */}
+                    <button
+                      onClick={() => handleToggleCache(song)}
+                      className={`p-1.5 rounded-lg transition ${
+                        cached
+                          ? 'text-emerald-400 bg-emerald-500/10'
+                          : 'opacity-40 hover:opacity-100 hover:text-white'
+                      }`}
+                      title={cached ? 'Available Offline (Click to remove)' : 'Download for offline play'}
+                    >
+                      {cached ? <CheckCircle2 className="w-4 h-4" /> : <DownloadCloud className="w-4 h-4" />}
+                    </button>
+
+                    <button
+                      onClick={() => removeFromPlaylist(selectedPlaylist.id, song.id)}
+                      className="p-1.5 opacity-30 hover:opacity-100 hover:text-red-400 transition"
+                      title="Remove from playlist"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
