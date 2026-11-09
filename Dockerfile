@@ -7,7 +7,7 @@ WORKDIR /app
 
 # Install build dependencies
 COPY package*.json ./
-RUN npm install
+RUN npm install --legacy-peer-deps
 
 # Copy source tree
 COPY . .
@@ -28,15 +28,13 @@ ENV NODE_ENV=production
 ENV PORT=80
 
 COPY package*.json ./
-RUN npm install --omit=dev
 
+# Reuse node_modules from builder stage (avoids peer dependency conflicts and second install)
+COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/public ./public
 COPY server.ts ./
 COPY tsconfig.json ./
-
-# Install tsx runner for server.ts
-RUN npm install -g tsx
 
 EXPOSE 80
 
@@ -44,5 +42,5 @@ EXPOSE 80
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
   CMD wget --quiet --tries=1 --spider http://localhost:80/api/health || exit 1
 
-# Start Muzika full-stack server
-CMD ["tsx", "server.ts"]
+# Start Muzika full-stack server using local tsx binary
+CMD ["./node_modules/.bin/tsx", "server.ts"]
