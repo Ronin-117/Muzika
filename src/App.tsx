@@ -18,7 +18,9 @@ import { SettingsScreen } from './components/screens/SettingsScreen';
 import { PlaylistDetailModal } from './components/screens/PlaylistDetailModal';
 import { ArtistDetailModal } from './components/screens/ArtistDetailModal';
 import { AlbumDetailModal } from './components/screens/AlbumDetailModal';
+import { ExitConfirmModal } from './components/common/ExitConfirmModal';
 import { PWAUpdateToast } from './components/common/PWAUpdateToast';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { WifiOff } from 'lucide-react';
 
 function OfflineBanner() {
@@ -60,12 +62,14 @@ function MuzikaApp() {
       <OfflineBanner />
 
       <main className="flex-1 overflow-x-hidden">
-        {activeTab === 'home' && <HomeScreen />}
-        {activeTab === 'explore' && <ExploreScreen />}
-        {activeTab === 'search' && <SearchScreen />}
-        {activeTab === 'library' && <LibraryScreen />}
-        {activeTab === 'rewind' && <RewindScreen />}
-        {activeTab === 'settings' && <SettingsScreen />}
+        <ErrorBoundary>
+          {activeTab === 'home' && <HomeScreen />}
+          {activeTab === 'explore' && <ExploreScreen />}
+          {activeTab === 'search' && <SearchScreen />}
+          {activeTab === 'library' && <LibraryScreen />}
+          {activeTab === 'rewind' && <RewindScreen />}
+          {activeTab === 'settings' && <SettingsScreen />}
+        </ErrorBoundary>
       </main>
 
       {/* Detail Overlays */}
@@ -85,6 +89,7 @@ function MuzikaApp() {
       <StatsForNerdsModal />
       <PWAInstallModal />
       <RiplayImportModal isOpen={isRiplayImportOpen} onClose={() => setIsRiplayImportOpen(false)} />
+      <ExitConfirmModal />
 
       {/* Persistent YouTube Iframe Embed Container */}
       <div

@@ -20,6 +20,7 @@ import {
   Check,
   UserPlus,
   UserCheck,
+  FileDown,
 } from 'lucide-react';
 import { Song, Artist, Album } from '../../types/music';
 
@@ -35,6 +36,7 @@ export const LibraryScreen: React.FC = () => {
     deletePlaylist,
     setSelectedPlaylist,
     setSelectedArtistId,
+    setSelectedArtist,
     setSelectedAlbum,
     playSong,
     addLocalSongs,
@@ -73,21 +75,25 @@ export const LibraryScreen: React.FC = () => {
     setShowCreateModal(false);
   };
 
-  // Combine Saved + Catalog + Imported Artists
+  // Combine Saved + Imported Artists (fallback to INITIAL_ARTISTS only when library is empty)
   const allArtists = useMemo(() => {
     const map = new Map<string, Artist>();
     savedArtists.forEach((a) => map.set(a.id, a));
-    INITIAL_ARTISTS.forEach((a) => map.set(a.id, a));
     importedArtists.forEach((a) => map.set(a.id, a));
+    if (map.size === 0) {
+      INITIAL_ARTISTS.forEach((a) => map.set(a.id, a));
+    }
     return Array.from(map.values());
   }, [savedArtists, importedArtists]);
 
-  // Combine Saved + Catalog + Imported Albums
+  // Combine Saved + Imported Albums (fallback to INITIAL_ALBUMS only when library is empty)
   const allAlbums = useMemo(() => {
     const map = new Map<string, Album>();
     savedAlbums.forEach((a) => map.set(a.id, a));
-    INITIAL_ALBUMS.forEach((a) => map.set(a.id, a));
     importedAlbums.forEach((a) => map.set(a.id, a));
+    if (map.size === 0) {
+      INITIAL_ALBUMS.forEach((a) => map.set(a.id, a));
+    }
     return Array.from(map.values());
   }, [savedAlbums, importedAlbums]);
 
@@ -122,6 +128,23 @@ export const LibraryScreen: React.FC = () => {
     if (importedSongs.length > 0) {
       playSong(importedSongs[0], importedSongs);
     }
+  };
+
+  const handleExportSingleTrack = (record: any) => {
+    hapticFeedback();
+    if (!record.audioBlob || record.audioBlob.size < 1000) {
+      alert('Audio file is still buffering or not yet saved. Play the song while online to cache its full audio.');
+      return;
+    }
+    const url = URL.createObjectURL(record.audioBlob);
+    const a = document.createElement('a');
+    a.href = url;
+    const cleanName = `${record.song.artist} - ${record.song.title}`.replace(/[/\\?%*:|"<>]/g, '_');
+    a.download = `${cleanName}.mp3`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -329,7 +352,14 @@ export const LibraryScreen: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => handleExportSingleTrack(record)}
+                        className="p-2 opacity-50 hover:opacity-100 hover:text-emerald-400 transition"
+                        title="Download MP3 file to device / SD card"
+                      >
+                        <FileDown className="w-4 h-4" />
+                      </button>
                       <button
                         onClick={() => removeCachedSong(song.id)}
                         className="p-2 opacity-40 hover:opacity-100 hover:text-red-400 transition"
@@ -389,6 +419,7 @@ export const LibraryScreen: React.FC = () => {
                     key={artist.id}
                     onClick={() => {
                       hapticFeedback();
+                      setSelectedArtist(artist);
                       setSelectedArtistId(artist.id);
                     }}
                     className="flex items-center justify-between p-3 rounded-2xl bg-white/5 hover:bg-white/10 transition cursor-pointer border border-white/5 group"
@@ -400,7 +431,9 @@ export const LibraryScreen: React.FC = () => {
                       <div className="min-w-0 flex-1">
                         <div className="text-xs font-bold truncate text-white leading-tight">{artist.name}</div>
                         <div className="text-[10px] opacity-50 truncate mt-0.5">
-                          {artist.subscribers || 'Artist'}
+                          {typeof artist.subscribers === 'string'
+                            ? artist.subscribers
+                            : (artist.subscribers as any)?.text || 'Artist'}
                         </div>
                       </div>
                     </div>

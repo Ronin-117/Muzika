@@ -1,7 +1,7 @@
 {
   "name": "muzika",
   "private": true,
-  "version": "2.5.5",
+  "version": "2.5.7",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",

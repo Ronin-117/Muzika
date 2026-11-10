@@ -36,7 +36,10 @@ class OfflineCacheService {
 
   constructor() {
     if (typeof window !== 'undefined' && 'indexedDB' in window) {
-      this.initDB().then(() => this.refreshCachedIds());
+      this.initDB().then(() => {
+        this.refreshCachedIds();
+        this.requestPersistence().catch(() => {});
+      });
     }
   }
 
@@ -324,6 +327,30 @@ class OfflineCacheService {
         await this.removeCachedSong(record.id);
       }
     }
+  }
+
+  // Persistent Storage API: guards against automatic eviction by Android / Chrome
+  async isStoragePersisted(): Promise<boolean> {
+    if (typeof navigator !== 'undefined' && navigator.storage && navigator.storage.persisted) {
+      try {
+        return await navigator.storage.persisted();
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  }
+
+  async requestPersistence(): Promise<boolean> {
+    if (typeof navigator !== 'undefined' && navigator.storage && navigator.storage.persist) {
+      try {
+        const granted = await navigator.storage.persist();
+        return granted;
+      } catch {
+        return false;
+      }
+    }
+    return false;
   }
 }
 

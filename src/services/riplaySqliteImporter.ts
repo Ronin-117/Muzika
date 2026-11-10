@@ -363,76 +363,151 @@ export class RiplaySqliteImporter {
         });
       }
 
-      // 8. Parse Artists with songs (Filter: ONLY bookmarked or has library songs)
+      // Deduplicate all unique songs across catalogs for cross-referencing artists and albums
+      const allUniqueSongs = Array.from(new Set(songMap.values()));
+
+      // 8. Parse Artists with songs (Import ALL artists from table + group songs by artist)
       const importedArtists: Artist[] = [];
-      if (artistTable) {
-        const artistSongsMap = new Map<string, Song[]>();
-        if (songArtistTable) {
-          const crossRows = queryTableRows(db, songArtistTable);
-          crossRows.forEach((cr) => {
-            const aId = String(cr.artistid || '');
-            const sId = String(cr.songid || '');
-            const song = songMap.get(sId) || songMap.get(`yt-${sId}`);
-            if (aId && song) {
-              if (!artistSongsMap.has(aId)) artistSongsMap.set(aId, []);
-              artistSongsMap.get(aId)!.push(song);
-            }
-          });
-        }
+      const seenArtistNames = new Set<string>();
+      const artistSongsMap = new Map<string, Song[]>();
 
-        artistMap.forEach((meta, artistId) => {
-          const songs = artistSongsMap.get(artistId) || [];
-          // ONLY import if explicitly bookmarked OR has songs in the user's library
-          if (meta.isBookmarked || songs.length > 0) {
-            importedArtists.push({
-              id: artistId,
-              name: meta.name,
-              thumbnailUrl:
-                meta.thumbnailUrl ||
-                songs[0]?.thumbnailUrl ||
-                'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&q=80',
-              subscribers: 'Imported Artist',
-              topSongs: songs.slice(0, 20),
-            });
+      if (songArtistTable) {
+        const crossRows = queryTableRows(db, songArtistTable);
+        crossRows.forEach((cr) => {
+          const aId = String(cr.artistid || '');
+          const sId = String(cr.songid || '');
+          const song = songMap.get(sId) || songMap.get(`yt-${sId}`);
+          if (aId && song) {
+            if (!artistSongsMap.has(aId)) artistSongsMap.set(aId, []);
+            artistSongsMap.get(aId)!.push(song);
           }
         });
       }
 
-      // 9. Parse Albums with songs (Filter: ONLY bookmarked or has library songs)
+      // Also map songs by artist name or artistId from Song table
+      allUniqueSongs.forEach((song) => {
+        if (song.artistId) {
+          if (!artistSongsMap.has(song.artistId)) artistSongsMap.set(song.artistId, []);
+          if (!artistSongsMap.get(song.artistId)!.some((s) => s.id === song.id)) {
+            artistSongsMap.get(song.artistId)!.push(song);
+          }
+        }
+      });
+
+      // 8a. Add all explicit artists from Artist table
+      artistMap.forEach((meta, artistId) => {
+        let songs = artistSongsMap.get(artistId) || [];
+        if (songs.length === 0) {
+          // Find matching songs by artist name
+          songs = allUniqueSongs.filter(
+            (s) => s.artist.toLowerCase() === meta.name.toLowerCase()
+          );
+        }
+
+        seenArtistNames.add(meta.name.toLowerCase());
+        importedArtists.push({
+          id: artistId,
+          name: meta.name,
+          thumbnailUrl:
+            meta.thumbnailUrl ||
+            songs[0]?.thumbnailUrl ||
+            'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&q=80',
+          subscribers: 'Saved Artist',
+          topSongs: songs.slice(0, 30),
+        });
+      });
+
+      // 8b. Add artists extracted from songs if not already in Artist table
+      allUniqueSongs.forEach((song) => {
+        if (!song.artist || song.artist === 'Unknown Artist') return;
+        const normName = song.artist.toLowerCase();
+        if (!seenArtistNames.has(normName)) {
+          seenArtistNames.add(normName);
+          const artistSongs = allUniqueSongs.filter(
+            (s) => s.artist.toLowerCase() === normName
+          );
+          importedArtists.push({
+            id: `riplay_art_${encodeURIComponent(song.artist)}`,
+            name: song.artist,
+            thumbnailUrl: song.thumbnailUrl,
+            subscribers: `${artistSongs.length} Songs`,
+            topSongs: artistSongs.slice(0, 30),
+          });
+        }
+      });
+
+      // 9. Parse Albums with songs (Import ALL albums from table + group songs by album)
       const importedAlbums: Album[] = [];
-      if (albumTable) {
-        const albumSongsMap = new Map<string, Song[]>();
-        if (songAlbumTable) {
-          const crossRows = queryTableRows(db, songAlbumTable);
-          crossRows.forEach((cr) => {
-            const albId = String(cr.albumid || '');
-            const sId = String(cr.songid || '');
-            const song = songMap.get(sId) || songMap.get(`yt-${sId}`);
-            if (albId && song) {
-              if (!albumSongsMap.has(albId)) albumSongsMap.set(albId, []);
-              albumSongsMap.get(albId)!.push(song);
-            }
-          });
-        }
+      const seenAlbumTitles = new Set<string>();
+      const albumSongsMap = new Map<string, Song[]>();
 
-        albumMap.forEach((meta, albId) => {
-          const songs = albumSongsMap.get(albId) || [];
-          // ONLY import if explicitly bookmarked OR has songs in the user's library
-          if (meta.isBookmarked || songs.length > 0) {
-            importedAlbums.push({
-              id: albId,
-              title: cleanTitle(meta.title),
-              artist: meta.artist || 'Various Artists',
-              year: meta.year || '2024',
-              coverUrl:
-                meta.coverUrl ||
-                songs[0]?.thumbnailUrl ||
-                'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=500&q=80',
-              songs,
-            });
+      if (songAlbumTable) {
+        const crossRows = queryTableRows(db, songAlbumTable);
+        crossRows.forEach((cr) => {
+          const albId = String(cr.albumid || '');
+          const sId = String(cr.songid || '');
+          const song = songMap.get(sId) || songMap.get(`yt-${sId}`);
+          if (albId && song) {
+            if (!albumSongsMap.has(albId)) albumSongsMap.set(albId, []);
+            albumSongsMap.get(albId)!.push(song);
           }
         });
       }
+
+      // Also map songs by albumId or album title from Song table
+      allUniqueSongs.forEach((song) => {
+        if (song.albumId) {
+          if (!albumSongsMap.has(song.albumId)) albumSongsMap.set(song.albumId, []);
+          if (!albumSongsMap.get(song.albumId)!.some((s) => s.id === song.id)) {
+            albumSongsMap.get(song.albumId)!.push(song);
+          }
+        }
+      });
+
+      // 9a. Add all explicit albums from Album table
+      albumMap.forEach((meta, albId) => {
+        let songs = albumSongsMap.get(albId) || [];
+        if (songs.length === 0) {
+          // Find matching songs by album title
+          songs = allUniqueSongs.filter(
+            (s) => s.album && s.album.toLowerCase() === meta.title.toLowerCase()
+          );
+        }
+
+        const title = cleanTitle(meta.title);
+        seenAlbumTitles.add(title.toLowerCase());
+        importedAlbums.push({
+          id: albId,
+          title,
+          artist: meta.artist || songs[0]?.artist || 'Various Artists',
+          year: meta.year || 'Album',
+          coverUrl:
+            meta.coverUrl ||
+            songs[0]?.thumbnailUrl ||
+            'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=500&q=80',
+          songs,
+        });
+      });
+
+      // 9b. Add albums extracted from songs if not already in Album table
+      allUniqueSongs.forEach((song) => {
+        if (!song.album || song.album === 'Single' || song.album === 'Music') return;
+        const normTitle = song.album.toLowerCase();
+        if (!seenAlbumTitles.has(normTitle)) {
+          seenAlbumTitles.add(normTitle);
+          const albumSongs = allUniqueSongs.filter(
+            (s) => s.album && s.album.toLowerCase() === normTitle
+          );
+          importedAlbums.push({
+            id: `riplay_alb_${encodeURIComponent(song.album)}`,
+            title: song.album,
+            artist: song.artist,
+            year: song.year ? String(song.year) : 'Album',
+            coverUrl: song.thumbnailUrl,
+            songs: albumSongs,
+          });
+        }
+      });
 
       // 10. Parse Blacklist
       const importedBlacklist: { id: string; name: string; type: 'song' | 'artist' }[] = [];
@@ -446,9 +521,6 @@ export class RiplaySqliteImporter {
           importedBlacklist.push({ id, name, type });
         });
       }
-
-      // Deduplicate unique songs
-      const allUniqueSongs = Array.from(new Set(songMap.values()));
 
       return {
         songsCount: allUniqueSongs.length,

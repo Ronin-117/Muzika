@@ -1,12 +1,16 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useMusic } from '../../context/MusicContext';
 import { INITIAL_ARTISTS } from '../../data/mockCatalog';
-import { ArrowLeft, Play, Users, Heart, UserPlus, Check } from 'lucide-react';
+import { ArrowLeft, Play, Users, Heart, UserPlus, Check, Loader2, Music } from 'lucide-react';
+import { OnlineMusicService } from '../../services/onlineMusicService';
+import { Song } from '../../types/music';
 
 export const ArtistDetailModal: React.FC = () => {
   const {
     selectedArtistId,
     setSelectedArtistId,
+    selectedArtist,
+    setSelectedArtist,
     playSong,
     themeColors,
     toggleLike,
@@ -18,15 +22,61 @@ export const ArtistDetailModal: React.FC = () => {
     isArtistFollowed,
   } = useMusic();
 
-  if (!selectedArtistId) return null;
+  const [topSongs, setTopSongs] = useState<Song[]>([]);
+  const [isLoadingSongs, setIsLoadingSongs] = useState(false);
 
+  // Determine artist entity from context or storage/catalog
   const artist =
-    INITIAL_ARTISTS.find((a) => a.id === selectedArtistId) ||
+    selectedArtist ||
+    savedArtists.find((a) => a.id === selectedArtistId) ||
     importedArtists.find((a) => a.id === selectedArtistId) ||
-    savedArtists.find((a) => a.id === selectedArtistId);
+    INITIAL_ARTISTS.find((a) => a.id === selectedArtistId);
+
+  useEffect(() => {
+    if (!artist) {
+      setTopSongs([]);
+      return;
+    }
+
+    if (artist.topSongs && artist.topSongs.length > 0) {
+      setTopSongs(artist.topSongs);
+      setIsLoadingSongs(false);
+      return;
+    }
+
+    // If top songs list is empty, fetch verified songs dynamically from YouTube Music
+    let isMounted = true;
+    setIsLoadingSongs(true);
+    OnlineMusicService.fetchArtistTopSongs(artist.id)
+      .then((data) => {
+        if (isMounted) {
+          setTopSongs(data.topSongs || []);
+          setIsLoadingSongs(false);
+        }
+      })
+      .catch(() => {
+        if (isMounted) setIsLoadingSongs(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [artist?.id]);
+
+  if (!selectedArtistId && !selectedArtist) return null;
   if (!artist) return null;
 
   const isFollowed = isArtistFollowed(artist.id);
+
+  const handleBack = () => {
+    hapticFeedback();
+    if (typeof window !== 'undefined' && window.history.length > 1) {
+      window.history.back();
+    } else {
+      setSelectedArtistId(null);
+      setSelectedArtist(null);
+    }
+  };
 
   return (
     <div
@@ -37,11 +87,9 @@ export const ArtistDetailModal: React.FC = () => {
       <div className="sticky top-0 z-20 px-4 py-3 flex items-center justify-between backdrop-blur-md border-b border-white/5">
         <div className="flex items-center gap-3 min-w-0 flex-1">
           <button
-            onClick={() => {
-              hapticFeedback();
-              setSelectedArtistId(null);
-            }}
+            onClick={handleBack}
             className="p-2 rounded-full hover:bg-white/10 transition"
+            title="Go back"
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
@@ -91,7 +139,11 @@ export const ArtistDetailModal: React.FC = () => {
               <h1 className="text-xl font-black truncate">{artist.name}</h1>
               <div className="flex items-center gap-1.5 text-xs opacity-60">
                 <Users className="w-3.5 h-3.5" />
-                <span>{artist.subscribers || '1M'} Monthly Listeners</span>
+                <span>
+                  {typeof artist.subscribers === 'string'
+                    ? artist.subscribers
+                    : (artist.subscribers as any)?.text || 'Artist'}
+                </span>
               </div>
             </div>
           </div>
@@ -108,57 +160,74 @@ export const ArtistDetailModal: React.FC = () => {
         <section className="space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-bold">Popular Songs</h2>
-            <button
-              onClick={() => {
-                hapticFeedback();
-                if (artist.topSongs.length > 0) playSong(artist.topSongs[0], artist.topSongs);
-              }}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold text-white shadow-md"
-              style={{ backgroundColor: themeColors.accent }}
-            >
-              <Play className="w-3.5 h-3.5 fill-white" /> Play All
-            </button>
+            {topSongs.length > 0 && (
+              <button
+                onClick={() => {
+                  hapticFeedback();
+                  playSong(topSongs[0], topSongs);
+                }}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold text-white shadow-md active:scale-95 transition"
+                style={{ backgroundColor: themeColors.accent }}
+              >
+                <Play className="w-3.5 h-3.5 fill-white" /> Play All
+              </button>
+            )}
           </div>
 
-          <div className="space-y-1.5">
-            {artist.topSongs.map((song, idx) => {
-              const liked = isLiked(song.id);
-              return (
-                <div
-                  key={song.id}
-                  onClick={() => {
-                    hapticFeedback();
-                    playSong(song, artist.topSongs);
-                  }}
-                  className="flex items-center justify-between p-2.5 rounded-2xl bg-white/5 hover:bg-white/10 transition cursor-pointer group"
-                >
-                  <div className="flex items-center gap-3 min-w-0 flex-1">
-                    <span className="text-xs font-mono opacity-40 w-4 text-center">{idx + 1}</span>
-                    <div className="w-10 h-10 rounded-lg overflow-hidden shrink-0">
-                      <img src={song.thumbnailUrl} alt={song.title} className="w-full h-full object-cover" />
+          {isLoadingSongs ? (
+            <div className="py-10 flex flex-col items-center justify-center gap-2 text-white/50 text-xs">
+              <Loader2 className="w-6 h-6 animate-spin text-purple-400" />
+              <span>Loading top songs from YouTube Music...</span>
+            </div>
+          ) : topSongs.length > 0 ? (
+            <div className="space-y-1.5">
+              {topSongs.map((song, idx) => {
+                const liked = isLiked(song.id);
+                return (
+                  <div
+                    key={song.id}
+                    onClick={() => {
+                      hapticFeedback();
+                      playSong(song, topSongs);
+                    }}
+                    className="flex items-center justify-between p-2.5 rounded-2xl bg-white/5 hover:bg-white/10 transition cursor-pointer group active:scale-[0.99]"
+                  >
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <span className="text-xs font-mono opacity-40 w-4 text-center">{idx + 1}</span>
+                      <div className="relative w-10 h-10 rounded-lg overflow-hidden shrink-0 shadow">
+                        <img src={song.thumbnailUrl} alt={song.title} className="w-full h-full object-cover" />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
+                          <Play className="w-4 h-4 fill-white" />
+                        </div>
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-semibold truncate leading-tight text-white">{song.title}</div>
+                        <div className="text-xs opacity-60 truncate mt-0.5">{song.album || artist.name}</div>
+                      </div>
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm font-semibold truncate leading-tight">{song.title}</div>
-                      <div className="text-xs opacity-60 truncate">{song.album || artist.name}</div>
-                    </div>
-                  </div>
 
-                  <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
-                    <button
-                      onClick={() => toggleLike(song)}
-                      className="p-2 rounded-full hover:bg-white/10 transition"
-                    >
-                      <Heart
-                        className={`w-4 h-4 transition ${
-                          liked ? 'fill-rose-500 text-rose-500' : 'text-white/40'
-                        }`}
-                      />
-                    </button>
+                    <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => toggleLike(song)}
+                        className="p-2 rounded-full hover:bg-white/10 transition"
+                      >
+                        <Heart
+                          className={`w-4 h-4 transition ${
+                            liked ? 'fill-rose-500 text-rose-500' : 'text-white/40'
+                          }`}
+                        />
+                      </button>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="p-8 text-center text-xs opacity-50 bg-white/5 rounded-2xl flex flex-col items-center">
+              <Music className="w-8 h-8 mb-2 opacity-30" />
+              <span>No songs available for this artist yet.</span>
+            </div>
+          )}
         </section>
       </div>
     </div>

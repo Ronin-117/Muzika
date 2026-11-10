@@ -118,7 +118,11 @@ export const FullScreenPlayer: React.FC = () => {
         <button
           onClick={() => {
             hapticFeedback();
-            setIsPlayerOpen(false);
+            if (typeof window !== 'undefined' && window.history.length > 1) {
+              window.history.back();
+            } else {
+              setIsPlayerOpen(false);
+            }
           }}
           className="p-2 rounded-full hover:bg-white/10 transition text-white/80"
           title="Minimize player"
@@ -204,7 +208,13 @@ export const FullScreenPlayer: React.FC = () => {
       </div>
 
       {/* Main Center Area: Swappable Views (Cover / Video / Lyrics / Queue) */}
-      <div className="relative z-10 flex-1 flex flex-col items-center justify-center min-h-0 px-6 py-2">
+      <div
+        className={`relative z-10 flex-1 flex flex-col min-h-0 ${
+          activeTab === 'cover'
+            ? 'items-center justify-center px-6 py-2'
+            : 'w-full px-2 sm:px-6 py-1 overflow-hidden'
+        }`}
+      >
         {activeTab === 'cover' && (
           <div className="flex flex-col items-center justify-center w-full max-w-sm h-full my-auto">
             {/* Spinning Vinyl Record with Album Center */}
@@ -289,11 +299,21 @@ export const FullScreenPlayer: React.FC = () => {
       </div>
 
       {/* Bottom Controls Area */}
-      <div className="relative z-10 px-6 pb-6 pt-2 max-w-md mx-auto w-full flex flex-col gap-3">
+      <div
+        className={`relative z-10 max-w-md mx-auto w-full flex flex-col ${
+          activeTab === 'queue'
+            ? 'px-4 pb-3 pt-1 gap-1.5'
+            : 'px-6 pb-6 pt-2 gap-3'
+        }`}
+      >
         {/* Track Title, Artist & Like */}
         <div className="flex items-center justify-between">
           <div className="min-w-0 flex-1 pr-3">
-            <h1 className="text-xl sm:text-2xl font-black truncate leading-tight">
+            <h1
+              className={`font-black truncate leading-tight ${
+                activeTab === 'queue' ? 'text-base sm:text-lg' : 'text-xl sm:text-2xl'
+              }`}
+            >
               {currentSong.title}
             </h1>
             <p

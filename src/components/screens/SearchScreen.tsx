@@ -30,6 +30,7 @@ export const SearchScreen: React.FC = () => {
   const {
     playSong,
     setSelectedArtistId,
+    setSelectedArtist,
     setSelectedPlaylist,
     setSelectedAlbum,
     themeColors,
@@ -57,6 +58,7 @@ export const SearchScreen: React.FC = () => {
   const [isSearchingOnline, setIsSearchingOnline] = useState(false);
   const [onlineResults, setOnlineResults] = useState<Song[]>([]);
   const [onlineArtists, setOnlineArtists] = useState<Artist[]>([]);
+  const [onlineAlbums, setOnlineAlbums] = useState<Album[]>([]);
   const [cachingSongId, setCachingSongId] = useState<string | null>(null);
 
   const [searchHistory, setSearchHistory] = useState<string[]>([
@@ -75,6 +77,7 @@ export const SearchScreen: React.FC = () => {
     if (!trimmed) {
       setOnlineResults([]);
       setOnlineArtists([]);
+      setOnlineAlbums([]);
       setIsSearchingOnline(false);
       return;
     }
@@ -86,12 +89,14 @@ export const SearchScreen: React.FC = () => {
     setIsSearchingOnline(true);
     searchDebounceRef.current = window.setTimeout(async () => {
       try {
-        const [songs, artists] = await Promise.all([
+        const [songs, artists, albums] = await Promise.all([
           OnlineMusicService.searchOnlineMusic(trimmed, 30),
-          OnlineMusicService.searchOnlineArtists(trimmed, 6),
+          OnlineMusicService.searchOnlineArtists(trimmed, 10),
+          OnlineMusicService.searchOnlineAlbums(trimmed, 10),
         ]);
         setOnlineResults(songs);
         setOnlineArtists(artists);
+        setOnlineAlbums(albums);
       } catch (err) {
         console.warn('Online search error:', err);
       } finally {
@@ -170,47 +175,48 @@ export const SearchScreen: React.FC = () => {
 
     return Array.from(map.values()).filter(
       (s) =>
-        s.title.toLowerCase().includes(q) ||
-        s.artist.toLowerCase().includes(q) ||
-        s.album?.toLowerCase().includes(q)
+        (s.title || '').toLowerCase().includes(q) ||
+        (s.artist || '').toLowerCase().includes(q) ||
+        (s.album || '').toLowerCase().includes(q)
     );
   }, [query, likedSongs, playlists]);
 
   const allArtists = React.useMemo(() => {
     const map = new Map<string, Artist>();
-    INITIAL_ARTISTS.forEach((a) => map.set(a.id, a));
-    importedArtists.forEach((a) => map.set(a.id, a));
     savedArtists.forEach((a) => map.set(a.id, a));
+    importedArtists.forEach((a) => map.set(a.id, a));
     onlineArtists.forEach((a) => map.set(a.id, a));
+    INITIAL_ARTISTS.forEach((a) => map.set(a.id, a));
     return Array.from(map.values());
   }, [importedArtists, savedArtists, onlineArtists]);
 
   const filteredArtists = React.useMemo(() => {
     if (!query.trim()) return allArtists;
     const q = query.toLowerCase();
-    return allArtists.filter((a) => a.name.toLowerCase().includes(q));
+    return allArtists.filter((a) => (a.name || '').toLowerCase().includes(q));
   }, [query, allArtists]);
 
   const allAlbums = React.useMemo(() => {
     const map = new Map<string, Album>();
-    INITIAL_ALBUMS.forEach((a) => map.set(a.id, a));
-    importedAlbums.forEach((a) => map.set(a.id, a));
     savedAlbums.forEach((a) => map.set(a.id, a));
+    importedAlbums.forEach((a) => map.set(a.id, a));
+    onlineAlbums.forEach((a) => map.set(a.id, a));
+    INITIAL_ALBUMS.forEach((a) => map.set(a.id, a));
     return Array.from(map.values());
-  }, [importedAlbums, savedAlbums]);
+  }, [importedAlbums, savedAlbums, onlineAlbums]);
 
   const filteredAlbums = React.useMemo(() => {
     if (!query.trim()) return [];
     const q = query.toLowerCase();
     return allAlbums.filter(
-      (a) => a.title.toLowerCase().includes(q) || a.artist.toLowerCase().includes(q)
+      (a) => (a.title || '').toLowerCase().includes(q) || (a.artist || '').toLowerCase().includes(q)
     );
   }, [query, allAlbums]);
 
   const filteredPlaylists = React.useMemo(() => {
     if (!query.trim()) return [];
     const q = query.toLowerCase();
-    return playlists.filter((p) => p.title.toLowerCase().includes(q));
+    return playlists.filter((p) => (p.title || '').toLowerCase().includes(q));
   }, [query, playlists]);
 
   // Combined songs: local library matches first, followed by online tracks
@@ -220,13 +226,14 @@ export const SearchScreen: React.FC = () => {
 
     // Local matches
     localMatchedSongs.forEach((s) => {
-      seen.add(s.title.toLowerCase() + s.artist.toLowerCase());
+      const key = `${(s.title || '').toLowerCase()}_${(s.artist || '').toLowerCase()}`;
+      seen.add(key);
       list.push(s);
     });
 
     // Online matches
     onlineResults.forEach((s) => {
-      const key = s.title.toLowerCase() + s.artist.toLowerCase();
+      const key = `${(s.title || '').toLowerCase()}_${(s.artist || '').toLowerCase()}`;
       if (!seen.has(key)) {
         seen.add(key);
         list.push(s);
@@ -593,6 +600,7 @@ export const SearchScreen: React.FC = () => {
                       key={artist.id}
                       onClick={() => {
                         hapticFeedback();
+                        setSelectedArtist(artist);
                         setSelectedArtistId(artist.id);
                       }}
                       className="flex items-center justify-between p-2.5 rounded-2xl bg-white/5 hover:bg-white/10 transition cursor-pointer border border-white/5 group"
@@ -603,7 +611,11 @@ export const SearchScreen: React.FC = () => {
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="text-xs font-bold truncate text-white leading-tight">{artist.name}</div>
-                          <div className="text-[10px] opacity-50 truncate mt-0.5">{artist.subscribers || 'Artist'}</div>
+                          <div className="text-[10px] opacity-50 truncate mt-0.5">
+                            {typeof artist.subscribers === 'string'
+                              ? artist.subscribers
+                              : (artist.subscribers as any)?.text || 'Artist'}
+                          </div>
                         </div>
                       </div>
 

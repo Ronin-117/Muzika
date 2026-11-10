@@ -68,16 +68,17 @@ app.get('/api/health', (_req: Request, res: Response) => {
   });
 });
 
-// 2. YouTube Music / YouTube Search Endpoint (Returns full-length tracks with exact 11-char IDs)
+// 2. YouTube Music Search Endpoint (Supports songs, verified artists, and official albums)
 app.get('/api/search', async (req: Request, res: Response) => {
   const query = String(req.query.q || '').trim();
+  const searchType = String(req.query.type || 'song').toLowerCase().trim();
   const limit = Math.min(50, Math.max(1, parseInt(String(req.query.limit || '25'), 10)));
 
   if (!query) {
     return res.json([]);
   }
 
-  const cacheKey = `${query.toLowerCase()}_${limit}`;
+  const cacheKey = `${searchType}_${query.toLowerCase()}_${limit}`;
   const cached = searchCache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
     return res.json(cached.data);
@@ -88,6 +89,92 @@ app.get('/api/search', async (req: Request, res: Response) => {
     const results: any[] = [];
     const seen = new Set<string>();
 
+    // A. Artists Search
+    if (searchType === 'artist') {
+      try {
+        const artistRes = await yt.music.search(query, { type: 'artist' });
+        const artists = (artistRes.artists as any)?.contents || [];
+        for (const item of artists) {
+          const aId = String(item.id || '');
+          if (!aId || seen.has(aId)) continue;
+          seen.add(aId);
+
+          const name = String(item.name || item.title || 'Unknown Artist');
+          const thumbs = item.thumbnails || [];
+          const thumbnailUrl =
+            thumbs[thumbs.length - 1]?.url ||
+            thumbs[0]?.url ||
+            `https://i.ytimg.com/i/${aId}/1.jpg`;
+
+          const rawSub = item.subscribers || item.subtitle;
+          let subscribers = 'Verified Artist';
+          if (typeof rawSub === 'string') {
+            subscribers = rawSub;
+          } else if (rawSub && typeof rawSub === 'object') {
+            if (typeof rawSub.text === 'string') {
+              subscribers = rawSub.text;
+            } else if (Array.isArray(rawSub.runs)) {
+              subscribers = rawSub.runs.map((r: any) => r.text || '').join('');
+            }
+          }
+
+          results.push({
+            id: aId,
+            name,
+            thumbnailUrl,
+            subscribers,
+            topSongs: [],
+          });
+
+          if (results.length >= limit) break;
+        }
+      } catch (aErr: any) {
+        console.warn('YouTube Music artist search error:', aErr?.message || aErr);
+      }
+
+      searchCache.set(cacheKey, { data: results, timestamp: Date.now() });
+      return res.json(results);
+    }
+
+    // B. Albums Search
+    if (searchType === 'album') {
+      try {
+        const albumRes = await yt.music.search(query, { type: 'album' });
+        const albums = (albumRes.albums as any)?.contents || [];
+        for (const item of albums) {
+          const albId = String(item.id || '');
+          if (!albId || seen.has(albId)) continue;
+          seen.add(albId);
+
+          const title = String(item.title || 'Untitled Album');
+          const artist = String(item.author?.name || item.artists?.[0]?.name || 'Unknown Artist');
+          const year = item.year ? String(item.year) : undefined;
+          const thumbs = item.thumbnails || [];
+          const coverUrl =
+            thumbs[thumbs.length - 1]?.url ||
+            thumbs[0]?.url ||
+            'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=500&q=80';
+
+          results.push({
+            id: albId,
+            title,
+            artist,
+            year,
+            coverUrl,
+            songs: [],
+          });
+
+          if (results.length >= limit) break;
+        }
+      } catch (albErr: any) {
+        console.warn('YouTube Music album search error:', albErr?.message || albErr);
+      }
+
+      searchCache.set(cacheKey, { data: results, timestamp: Date.now() });
+      return res.json(results);
+    }
+
+    // C. Songs Search
     // 1. Primary search: YouTube Music dedicated songs catalog
     try {
       const songRes = await yt.music.search(query, { type: 'song' });
@@ -161,7 +248,7 @@ app.get('/api/search', async (req: Request, res: Response) => {
       }
     }
 
-    // 3. Last fallback: General YouTube search only if YouTube Music returned 0 tracks
+    // 3. Fallback: General YouTube search only if YouTube Music returned 0 tracks
     if (results.length === 0) {
       const searchRes = await yt.search(query);
       const items = (searchRes.videos || []).slice(0, limit);
@@ -186,13 +273,120 @@ app.get('/api/search', async (req: Request, res: Response) => {
       }
     }
 
-    console.log(`[Search] Query: "${query}" -> ${results.length} pure music tracks found`);
+    console.log(`[Search] Query: "${query}" (${searchType}) -> ${results.length} items found`);
     searchCache.set(cacheKey, { data: results, timestamp: Date.now() });
     return res.json(results);
   } catch (err: any) {
     console.error('Error during /api/search:', err?.message || err);
-    // Fallback: Return empty array so frontend can gracefully show empty state or fallback
     return res.json([]);
+  }
+});
+
+// 2b. YouTube Music Album Tracks Endpoint
+app.get('/api/album', async (req: Request, res: Response) => {
+  const id = String(req.query.id || '').trim();
+  if (!id) return res.status(400).json({ error: 'Album ID required' });
+
+  try {
+    const yt = await getInnertube();
+    const alb = await yt.music.getAlbum(id);
+    const header = alb.header as any;
+    const title = header?.title?.text || header?.title || 'Album';
+    const artist =
+      header?.strapline_text_one?.text ||
+      header?.author?.name ||
+      header?.artists?.[0]?.name ||
+      'Artist';
+    const coverUrl =
+      header?.thumbnail?.contents?.[0]?.url ||
+      (alb as any).thumbnails?.[0]?.url ||
+      'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=500&q=80';
+    const year = header?.subtitle?.text ? header.subtitle.text.replace(/[^0-9]/g, '') : undefined;
+
+    const songs: any[] = [];
+    for (const item of (alb.contents || [])) {
+      const track = item as any;
+      const vidId = track.id;
+      if (!vidId) continue;
+
+      songs.push({
+        id: `yt-${vidId}`,
+        title: track.title || 'Untitled Track',
+        artist: track.author?.name || track.artists?.[0]?.name || artist,
+        album: title,
+        duration: track.duration?.seconds || 210,
+        thumbnailUrl: coverUrl,
+        source: 'youtube',
+        youtubeId: vidId,
+        playCount: 0,
+      });
+    }
+
+    return res.json({
+      id,
+      title,
+      artist,
+      coverUrl,
+      year,
+      songs,
+    });
+  } catch (err: any) {
+    console.error('Error in /api/album:', err?.message || err);
+    return res.status(500).json({ error: 'Failed to fetch album tracks' });
+  }
+});
+
+// 2c. YouTube Music Artist Top Songs & Info Endpoint
+app.get('/api/artist', async (req: Request, res: Response) => {
+  const id = String(req.query.id || '').trim();
+  if (!id) return res.status(400).json({ error: 'Artist ID required' });
+
+  try {
+    const yt = await getInnertube();
+    const art = await yt.music.getArtist(id);
+    const header = art.header as any;
+    const name = header?.title?.text || header?.title || 'Artist';
+    const subscribers = header?.subscribers?.text || header?.subscribers || 'Verified Artist';
+    const bannerUrl = header?.thumbnails?.[header.thumbnails.length - 1]?.url;
+
+    const topSongsSection = art.sections.find(
+      (s: any) =>
+        (s.title?.text || '').toLowerCase().includes('top') ||
+        (s.title?.text || '').toLowerCase().includes('song')
+    );
+
+    const topSongs: any[] = [];
+    if (topSongsSection && topSongsSection.contents) {
+      for (const item of (topSongsSection.contents as any[])) {
+        const vidId = item.id;
+        if (!vidId) continue;
+
+        topSongs.push({
+          id: `yt-${vidId}`,
+          title: item.title || 'Untitled Song',
+          artist: item.artists?.[0]?.name || name,
+          album: item.album?.name || undefined,
+          duration: item.duration?.seconds || 210,
+          thumbnailUrl:
+            item.thumbnails?.[item.thumbnails.length - 1]?.url ||
+            `https://i.ytimg.com/vi/${vidId}/hqdefault.jpg`,
+          source: 'youtube',
+          youtubeId: vidId,
+          playCount: 0,
+        });
+      }
+    }
+
+    return res.json({
+      id,
+      name,
+      subscribers,
+      bannerUrl,
+      topSongs,
+    });
+  } catch (err: any) {
+    console.error('Error in /api/artist:', err?.message || err);
+    return res.status(500).json({ error: 'Failed to fetch artist info' });
   }
 });
 

@@ -18,10 +18,13 @@ import {
   Trash2,
   RefreshCw,
   Sparkles,
+  ShieldCheck,
+  HardDrive,
+  FileDown,
 } from 'lucide-react';
 import { StorageService } from '../../services/storageService';
 import { usePWAInstall } from '../../hooks/usePWAInstall';
-import { RetentionDuration } from '../../services/offlineCacheService';
+import { RetentionDuration, offlineCacheService } from '../../services/offlineCacheService';
 import { pwaUpdater } from '../../utils/pwaUpdater';
 import { APP_VERSION, APP_BUILD, APP_RELEASE_NAME } from '../../version';
 
@@ -45,6 +48,51 @@ export const SettingsScreen: React.FC = () => {
 
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<'idle' | 'up_to_date' | 'update_available'>('idle');
+  const [isPersisted, setIsPersisted] = useState(false);
+  const [exportingSongs, setExportingSongs] = useState(false);
+
+  React.useEffect(() => {
+    offlineCacheService.isStoragePersisted().then((val) => setIsPersisted(val));
+  }, []);
+
+  const handleRequestPersistence = async () => {
+    hapticFeedback();
+    const granted = await offlineCacheService.requestPersistence();
+    setIsPersisted(granted);
+    if (granted) {
+      alert('Permanent Storage Activated!\nAndroid OS and Chrome will never automatically evict or clear your offline cached music.');
+    } else {
+      alert('Persistent storage requested. Installing Muzika as a PWA on your Android home screen guarantees permanent storage protection.');
+    }
+  };
+
+  const handleExportAllOfflineMp3s = async () => {
+    hapticFeedback();
+    setExportingSongs(true);
+    try {
+      const records = await offlineCacheService.getAllCachedSongs();
+      const withAudio = records.filter((r) => r.audioBlob && r.audioBlob.size > 1000);
+      if (withAudio.length === 0) {
+        alert('No downloaded audio files ready for export yet. Tap the download icon next to any song while online to download its audio.');
+        return;
+      }
+      for (const record of withAudio) {
+        const url = URL.createObjectURL(record.audioBlob!);
+        const a = document.createElement('a');
+        a.href = url;
+        const cleanName = `${record.song.artist} - ${record.song.title}`.replace(/[/\\?%*:|"<>]/g, '_');
+        a.download = `${cleanName}.mp3`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        await new Promise((r) => setTimeout(r, 450));
+      }
+      alert(`Exported ${withAudio.length} MP3 track(s) directly to your device Downloads folder! You can now move them to your SD card.`);
+    } finally {
+      setExportingSongs(false);
+    }
+  };
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -305,7 +353,7 @@ export const SettingsScreen: React.FC = () => {
 
       {/* Offline Storage & Retention Settings (RiPlay Cache Management) */}
       <section className="space-y-3">
-        <h2 className="text-xs font-bold uppercase tracking-wider opacity-60">Offline Storage & Cache Location</h2>
+        <h2 className="text-xs font-bold uppercase tracking-wider opacity-60">Offline Storage & Cache Guard</h2>
         <div className="p-4 rounded-2xl bg-white/5 border border-white/5 space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
@@ -326,46 +374,66 @@ export const SettingsScreen: React.FC = () => {
                 }}
                 className="px-2.5 py-1 rounded-xl bg-red-500/20 text-red-400 hover:bg-red-500/30 text-xs font-semibold transition"
               >
-                Clear
+                Clear All
               </button>
             )}
           </div>
 
-          {/* Custom Memory Directory / SD Card Picker */}
-          <div className="p-3 rounded-xl bg-black/30 border border-white/5 space-y-2">
+          {/* Android Eviction Protection Guard (Never Delete) */}
+          <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-xs space-y-2">
             <div className="flex items-center justify-between">
-              <div>
-                <div className="text-xs font-bold text-white">Storage Location / SD Card</div>
-                <div className="text-[11px] opacity-60">Specify custom folder or external memory card</div>
+              <div className="font-bold text-emerald-400 flex items-center gap-1.5">
+                <ShieldCheck className="w-4 h-4 shrink-0" />
+                <span>{isPersisted ? 'Storage Eviction Guard: Active' : 'Storage Protection'}</span>
               </div>
-              <button
-                onClick={() => {
-                  hapticFeedback();
-                  if (typeof window !== 'undefined' && 'showDirectoryPicker' in window) {
-                    (window as any).showDirectoryPicker().then((handle: any) => {
-                      if (handle?.name) {
-                        localStorage.setItem('muzika_storage_path', handle.name);
-                        alert(`Storage volume mapped to: ${handle.name}`);
-                      }
-                    }).catch(() => {});
-                  } else {
-                    alert('Mobile PWA Sandboxing Notice:\nYour mobile OS automatically routes PWA cached media to primary/SD storage based on available system space. Storage is managed by browser sandboxed IndexedDB.');
-                  }
-                }}
-                className="px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 active:scale-95 text-xs font-semibold transition"
-              >
-                Select Folder
-              </button>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300">
+                {isPersisted ? 'NEVER DELETED' : 'STANDARD'}
+              </span>
             </div>
-            <div className="text-[11px] opacity-50 font-mono">
-              Path: {typeof window !== 'undefined' && localStorage.getItem('muzika_storage_path') ? `/storage/${localStorage.getItem('muzika_storage_path')}` : 'Auto (Browser Sandboxed Volume / SD Card)'}
+            <p className="text-[11px] opacity-75 leading-relaxed">
+              {isPersisted
+                ? 'Your offline songs are protected by the Android Persistent Storage API. Android OS and Chrome will NEVER automatically evict or clear your cached music, even if phone storage runs low.'
+                : 'Android currently manages cache under Chrome site data. Tap below to activate permanent eviction protection so songs are never deleted automatically.'}
+            </p>
+            {!isPersisted && (
+              <button
+                onClick={handleRequestPersistence}
+                className="px-3.5 py-2 rounded-xl text-black font-bold text-xs bg-emerald-400 hover:bg-emerald-300 transition active:scale-95 shadow-md flex items-center gap-1.5"
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>Enable Permanent Eviction Guard</span>
+              </button>
+            )}
+          </div>
+
+          {/* Storage Sandbox & SD Card Explanation */}
+          <div className="p-3.5 rounded-2xl bg-black/30 border border-white/5 space-y-2.5">
+            <div className="flex items-center gap-2">
+              <HardDrive className="w-4 h-4 text-cyan-400 shrink-0" />
+              <div className="text-xs font-bold text-white">Storage Location & SD Card Support</div>
+            </div>
+            <p className="text-[11px] opacity-70 leading-relaxed">
+              Because Muzika runs as a high-speed Android PWA, Android security stores cached audio in Chrome's high-speed persistent sandbox (shown under <strong>Chrome &gt; Storage &gt; Site Data</strong>). Web apps cannot write background audio directly to arbitrary raw SD card folder paths due to Android sandbox security.
+            </p>
+            <p className="text-[11px] opacity-70 leading-relaxed">
+              💡 <strong>Want to store on SD Card?</strong> You can set Chrome or Muzika's app storage location to your SD Card in your phone's <strong>Android Settings &gt; Apps &gt; Chrome (or Muzika) &gt; Storage &gt; Change Storage to SD Card</strong>.
+            </p>
+            <div className="pt-1">
+              <button
+                onClick={handleExportAllOfflineMp3s}
+                disabled={exportingSongs || storageEstimate.count === 0}
+                className="w-full py-2.5 px-3 rounded-xl bg-white/10 hover:bg-white/15 text-white font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95 border border-white/10 disabled:opacity-40"
+              >
+                <FileDown className="w-4 h-4 text-emerald-400" />
+                <span>{exportingSongs ? 'Exporting MP3s to Device...' : 'Export Offline Songs to Phone / SD (MP3 Files)'}</span>
+              </button>
             </div>
           </div>
 
           {/* Retention Options */}
           <div>
             <label className="text-xs font-semibold block mb-2 opacity-80">
-              Keep Cached Music For:
+              Auto-Cleanup Retention:
             </label>
             <div className="grid grid-cols-2 gap-2">
               {[

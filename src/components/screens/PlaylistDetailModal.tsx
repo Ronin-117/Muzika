@@ -61,7 +61,11 @@ export const PlaylistDetailModal: React.FC = () => {
         <button
           onClick={() => {
             hapticFeedback();
-            setSelectedPlaylist(null);
+            if (typeof window !== 'undefined' && window.history.length > 1) {
+              window.history.back();
+            } else {
+              setSelectedPlaylist(null);
+            }
           }}
           className="p-2 rounded-full hover:bg-white/10 transition"
         >

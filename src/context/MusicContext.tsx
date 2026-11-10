@@ -57,12 +57,16 @@ interface MusicContextType {
   setIsPWAInstallModalOpen: (open: boolean) => void;
   isRiplayImportOpen: boolean;
   setIsRiplayImportOpen: (open: boolean) => void;
+  isExitConfirmOpen: boolean;
+  setIsExitConfirmOpen: (open: boolean) => void;
 
   // Selected entities for detail screens
   selectedPlaylist: Playlist | null;
   setSelectedPlaylist: (playlist: Playlist | null) => void;
   selectedArtistId: string | null;
   setSelectedArtistId: (artistId: string | null) => void;
+  selectedArtist: Artist | null;
+  setSelectedArtist: (artist: Artist | null) => void;
   selectedAlbum: Album | null;
   setSelectedAlbum: (album: Album | null) => void;
 
@@ -181,22 +185,37 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     setActiveTabState(tab);
     if (typeof window !== 'undefined') {
       localStorage.setItem('muzika_active_tab', tab);
-      window.location.hash = tab;
     }
   };
 
-  const [isPlayerOpen, setIsPlayerOpen] = useState(false);
-  const [isQueueOpen, setIsQueueOpen] = useState(false);
-  const [isEqualizerOpen, setIsEqualizerOpen] = useState(false);
-  const [isSleepTimerOpen, setIsSleepTimerOpen] = useState(false);
-  const [isSongInfoOpen, setIsSongInfoOpen] = useState(false);
-  const [isPWAInstallModalOpen, setIsPWAInstallModalOpen] = useState(false);
-  const [isRiplayImportOpen, setIsRiplayImportOpen] = useState(false);
+  const [isPlayerOpen, setIsPlayerOpenState] = useState(false);
+  const [isQueueOpen, setIsQueueOpenState] = useState(false);
+  const [isEqualizerOpen, setIsEqualizerOpenState] = useState(false);
+  const [isSleepTimerOpen, setIsSleepTimerOpenState] = useState(false);
+  const [isSongInfoOpen, setIsSongInfoOpenState] = useState(false);
+  const [isPWAInstallModalOpen, setIsPWAInstallModalOpenState] = useState(false);
+  const [isRiplayImportOpen, setIsRiplayImportOpenState] = useState(false);
+  const [isExitConfirmOpen, setIsExitConfirmOpen] = useState(false);
   const [playerMode, setPlayerMode] = useState<'audio' | 'video' | 'lyrics'>('audio');
 
-  const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(null);
-  const [selectedArtistId, setSelectedArtistId] = useState<string | null>(null);
-  const [selectedAlbum, setSelectedAlbum] = useState<Album | null>(null);
+  const [selectedPlaylist, setSelectedPlaylistState] = useState<Playlist | null>(null);
+  const [selectedArtistId, setSelectedArtistIdState] = useState<string | null>(null);
+  const [selectedArtist, setSelectedArtist] = useState<Artist | null>(null);
+  const [selectedAlbum, setSelectedAlbumState] = useState<Album | null>(null);
+
+  const setIsPlayerOpen = (open: boolean) => setIsPlayerOpenState(open);
+  const setIsQueueOpen = (open: boolean) => setIsQueueOpenState(open);
+  const setIsEqualizerOpen = (open: boolean) => setIsEqualizerOpenState(open);
+  const setIsSleepTimerOpen = (open: boolean) => setIsSleepTimerOpenState(open);
+  const setIsSongInfoOpen = (open: boolean) => setIsSongInfoOpenState(open);
+  const setIsPWAInstallModalOpen = (open: boolean) => setIsPWAInstallModalOpenState(open);
+  const setIsRiplayImportOpen = (open: boolean) => setIsRiplayImportOpenState(open);
+  const setSelectedPlaylist = (playlist: Playlist | null) => setSelectedPlaylistState(playlist);
+  const setSelectedArtistId = (artistId: string | null) => {
+    setSelectedArtistIdState(artistId);
+    if (!artistId) setSelectedArtist(null);
+  };
+  const setSelectedAlbum = (album: Album | null) => setSelectedAlbumState(album);
 
   // Playback state restored from last session (Rewind support)
   const initialPlaybackState = useMemo(() => StorageService.getLastPlaybackState(), []);
@@ -245,60 +264,9 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [savedArtists, setSavedArtists] = useState<Artist[]>(() => StorageService.getSavedArtists());
   const [savedAlbums, setSavedAlbums] = useState<Album[]>(() => StorageService.getSavedAlbums());
 
-  // Handle browser back button modal closing
-  useEffect(() => {
-    const handlePopState = () => {
-      if (isPlayerOpen) {
-        setIsPlayerOpen(false);
-        return;
-      }
-      if (isQueueOpen) {
-        setIsQueueOpen(false);
-        return;
-      }
-      if (selectedPlaylist) {
-        setSelectedPlaylist(null);
-        return;
-      }
-      if (selectedArtistId) {
-        setSelectedArtistId(null);
-        return;
-      }
-      if (selectedAlbum) {
-        setSelectedAlbum(null);
-        return;
-      }
-      if (isEqualizerOpen) {
-        setIsEqualizerOpen(false);
-        return;
-      }
-      if (isSleepTimerOpen) {
-        setIsSleepTimerOpen(false);
-        return;
-      }
-      if (isSongInfoOpen) {
-        setIsSongInfoOpen(false);
-        return;
-      }
-      if (isRiplayImportOpen) {
-        setIsRiplayImportOpen(false);
-        return;
-      }
-      if (isPWAInstallModalOpen) {
-        setIsPWAInstallModalOpen(false);
-        return;
-      }
-    };
-
-    if (typeof window !== 'undefined') {
-      window.addEventListener('popstate', handlePopState);
-    }
-    return () => {
-      if (typeof window !== 'undefined') {
-        window.removeEventListener('popstate', handlePopState);
-      }
-    };
-  }, [
+  // Track latest navigation and modal states in a ref to avoid stale closures and re-binding loops
+  const navStateRef = useRef({
+    activeTab,
     isPlayerOpen,
     isQueueOpen,
     isEqualizerOpen,
@@ -306,10 +274,153 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     isSongInfoOpen,
     isPWAInstallModalOpen,
     isRiplayImportOpen,
+    isExitConfirmOpen,
     selectedPlaylist,
     selectedArtistId,
+    selectedArtist,
+    selectedAlbum,
+  });
+
+  useEffect(() => {
+    navStateRef.current = {
+      activeTab,
+      isPlayerOpen,
+      isQueueOpen,
+      isEqualizerOpen,
+      isSleepTimerOpen,
+      isSongInfoOpen,
+      isPWAInstallModalOpen,
+      isRiplayImportOpen,
+      isExitConfirmOpen,
+      selectedPlaylist,
+      selectedArtistId,
+      selectedArtist,
+      selectedAlbum,
+    };
+  }, [
+    activeTab,
+    isPlayerOpen,
+    isQueueOpen,
+    isEqualizerOpen,
+    isSleepTimerOpen,
+    isSongInfoOpen,
+    isPWAInstallModalOpen,
+    isRiplayImportOpen,
+    isExitConfirmOpen,
+    selectedPlaylist,
+    selectedArtistId,
+    selectedArtist,
     selectedAlbum,
   ]);
+
+  const ensureHistoryTrap = () => {
+    if (typeof window !== 'undefined') {
+      try {
+        window.history.pushState({ muzikaApp: true }, '');
+      } catch {}
+    }
+  };
+
+  // Initialize history trap and handle hardware back button navigation
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        window.history.replaceState({ muzikaRoot: true }, '');
+        window.history.pushState({ muzikaApp: true }, '');
+      } catch {}
+    }
+
+    const handlePopState = () => {
+      const state = navStateRef.current;
+
+      // 1. If Exit confirmation modal is open, back button dismisses it
+      if (state.isExitConfirmOpen) {
+        setIsExitConfirmOpen(false);
+        ensureHistoryTrap();
+        return;
+      }
+
+      // 2. Modals & sheets in order of depth
+      if (state.isSongInfoOpen) {
+        setIsSongInfoOpenState(false);
+        ensureHistoryTrap();
+        return;
+      }
+      if (state.isQueueOpen) {
+        setIsQueueOpenState(false);
+        ensureHistoryTrap();
+        return;
+      }
+      if (state.isEqualizerOpen) {
+        setIsEqualizerOpenState(false);
+        ensureHistoryTrap();
+        return;
+      }
+      if (state.isSleepTimerOpen) {
+        setIsSleepTimerOpenState(false);
+        ensureHistoryTrap();
+        return;
+      }
+      if (state.isRiplayImportOpen) {
+        setIsRiplayImportOpenState(false);
+        ensureHistoryTrap();
+        return;
+      }
+      if (state.isPWAInstallModalOpen) {
+        setIsPWAInstallModalOpenState(false);
+        ensureHistoryTrap();
+        return;
+      }
+
+      // 3. Entity Detail screens
+      if (state.selectedPlaylist) {
+        setSelectedPlaylistState(null);
+        ensureHistoryTrap();
+        return;
+      }
+      if (state.selectedArtistId || state.selectedArtist) {
+        setSelectedArtistIdState(null);
+        setSelectedArtist(null);
+        ensureHistoryTrap();
+        return;
+      }
+      if (state.selectedAlbum) {
+        setSelectedAlbumState(null);
+        ensureHistoryTrap();
+        return;
+      }
+
+      // 4. In app player: close player and navigate to Home screen
+      if (state.isPlayerOpen) {
+        setIsPlayerOpenState(false);
+        setActiveTabState('home');
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('muzika_active_tab', 'home');
+        }
+        ensureHistoryTrap();
+        return;
+      }
+
+      // 5. If on another tab, navigate back to Home screen
+      if (state.activeTab !== 'home') {
+        setActiveTabState('home');
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('muzika_active_tab', 'home');
+        }
+        ensureHistoryTrap();
+        return;
+      }
+
+      // 6. We are on Home with no modals open: Prompt user before quitting!
+      ensureHistoryTrap();
+      setIsExitConfirmOpen(true);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -1357,13 +1468,20 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       });
     }
 
-    // 5. Save imported artists & albums
+    // 5. Save imported artists & albums into both imported and saved collections
     if (summary.importedArtists.length > 0) {
       setImportedArtists((prev) => {
         const existingIds = new Set(prev.map((a) => a.id));
         const newArtists = summary.importedArtists.filter((a) => !existingIds.has(a.id));
         const combined = [...prev, ...newArtists];
         StorageService.saveCustomArtists(combined);
+        return combined;
+      });
+      setSavedArtists((prev) => {
+        const existingIds = new Set(prev.map((a) => a.id));
+        const newArtists = summary.importedArtists.filter((a) => !existingIds.has(a.id));
+        const combined = [...prev, ...newArtists];
+        StorageService.saveSavedArtists(combined);
         return combined;
       });
     }
@@ -1374,6 +1492,13 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         const newAlbums = summary.importedAlbums.filter((a) => !existingIds.has(a.id));
         const combined = [...prev, ...newAlbums];
         StorageService.saveCustomAlbums(combined);
+        return combined;
+      });
+      setSavedAlbums((prev) => {
+        const existingIds = new Set(prev.map((a) => a.id));
+        const newAlbums = summary.importedAlbums.filter((a) => !existingIds.has(a.id));
+        const combined = [...prev, ...newAlbums];
+        StorageService.saveSavedAlbums(combined);
         return combined;
       });
     }
@@ -1447,10 +1572,14 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         setIsPWAInstallModalOpen,
         isRiplayImportOpen,
         setIsRiplayImportOpen,
+        isExitConfirmOpen,
+        setIsExitConfirmOpen,
         selectedPlaylist,
         setSelectedPlaylist,
         selectedArtistId,
         setSelectedArtistId,
+        selectedArtist,
+        setSelectedArtist,
         selectedAlbum,
         setSelectedAlbum,
         activeTab,

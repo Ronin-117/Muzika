@@ -1,4 +1,4 @@
-import { Song, Artist } from '../types/music';
+import { Song, Artist, Album } from '../types/music';
 
 // Cache recent search queries to minimize redundant network requests
 const searchCache = new Map<string, Song[]>();
@@ -112,33 +112,113 @@ export class OnlineMusicService {
   }
 
   /**
-   * Searches for artists online
+  /**
+   * Searches for verified artists online via YouTube Music
    */
-  static async searchOnlineArtists(query: string, limit = 6): Promise<Artist[]> {
-    if (!query.trim()) return [];
+  static async searchOnlineArtists(query: string, limit = 12): Promise<Artist[]> {
+    const trimmed = query.trim();
+    if (!trimmed) return [];
 
     try {
-      const url = `https://discoveryprovider.audius.co/v1/users/search?query=${encodeURIComponent(query.trim())}&app_name=MUZIKA`;
-      const res = await fetch(url);
+      const res = await fetch(`/api/search?q=${encodeURIComponent(trimmed)}&type=artist&limit=${limit}`);
       if (res.ok) {
         const data = await res.json();
-        if (data.data && Array.isArray(data.data) && data.data.length > 0) {
-          return data.data.slice(0, limit).map((u: any) => ({
-            id: `artist-${u.id}`,
-            name: u.name,
-            thumbnailUrl: u.profile_picture?.['480x480'] || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&q=80',
-            bannerUrl: u.cover_photo?.['640x'] || undefined,
-            subscribers: `${u.follower_count || 100} Followers`,
-            bio: u.bio || undefined,
-            topSongs: [],
-          }));
+        if (Array.isArray(data) && data.length > 0) {
+          return data.map((item: any) => {
+            const rawSub = item.subscribers;
+            const subscribers = typeof rawSub === 'string'
+              ? rawSub
+              : (rawSub?.text || (Array.isArray(rawSub?.runs) ? rawSub.runs.map((r: any) => r.text || '').join('') : 'Verified Artist'));
+
+            return {
+              id: String(item.id || ''),
+              name: String(item.name || 'Unknown Artist'),
+              thumbnailUrl: item.thumbnailUrl,
+              bannerUrl: item.bannerUrl,
+              subscribers,
+              bio: item.bio,
+              topSongs: item.topSongs || [],
+            };
+          });
         }
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      console.warn('Online artist search error:', err);
     }
 
     return [];
+  }
+
+  /**
+   * Searches for official albums online via YouTube Music
+   */
+  static async searchOnlineAlbums(query: string, limit = 12): Promise<Album[]> {
+    const trimmed = query.trim();
+    if (!trimmed) return [];
+
+    try {
+      const res = await fetch(`/api/search?q=${encodeURIComponent(trimmed)}&type=album&limit=${limit}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          return data.map((item: any) => ({
+            id: item.id,
+            title: item.title,
+            artist: item.artist,
+            year: item.year,
+            coverUrl: item.coverUrl,
+            songs: item.songs || [],
+          }));
+        }
+      }
+    } catch (err) {
+      console.warn('Online album search error:', err);
+    }
+
+    return [];
+  }
+
+  /**
+   * Fetches full track list for an album
+   */
+  static async fetchAlbumTracks(albumId: string): Promise<Song[]> {
+    if (!albumId) return [];
+
+    try {
+      const res = await fetch(`/api/album?id=${encodeURIComponent(albumId)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.songs)) {
+          return data.songs;
+        }
+      }
+    } catch (err) {
+      console.warn('Fetch album tracks error:', err);
+    }
+
+    return [];
+  }
+
+  /**
+   * Fetches top songs for an artist
+   */
+  static async fetchArtistTopSongs(artistId: string): Promise<{ bannerUrl?: string; topSongs: Song[] }> {
+    if (!artistId) return { topSongs: [] };
+
+    try {
+      const res = await fetch(`/api/artist?id=${encodeURIComponent(artistId)}`);
+      if (res.ok) {
+        const data = await res.json();
+        return {
+          bannerUrl: data.bannerUrl,
+          topSongs: Array.isArray(data.topSongs) ? data.topSongs : [],
+        };
+      }
+    } catch (err) {
+      console.warn('Fetch artist top songs error:', err);
+    }
+
+    return { topSongs: [] };
   }
 
   /**

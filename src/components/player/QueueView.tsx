@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 import { useMusic } from '../../context/MusicContext';
-import { Trash2, Music2, GripVertical, Play } from 'lucide-react';
+import { Trash2, Music2, Play, Volume2, LocateFixed } from 'lucide-react';
 
 export const QueueView: React.FC = () => {
   const {
@@ -13,80 +13,139 @@ export const QueueView: React.FC = () => {
     hapticFeedback,
   } = useMusic();
 
+  const activeItemRef = useRef<HTMLDivElement | null>(null);
+  const listContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // Automatically scroll currently playing song into view
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (activeItemRef.current) {
+        activeItemRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [queueIndex]);
+
+  const handleScrollToCurrent = () => {
+    hapticFeedback();
+    activeItemRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
+
+  const totalDuration = queue.reduce((acc, s) => acc + (s.duration || 180), 0);
+  const totalMins = Math.floor(totalDuration / 60);
+
   return (
-    <div className="flex-1 flex flex-col h-full min-h-0 overflow-hidden px-4 pt-2 pb-2">
+    <div className="w-full max-w-md mx-auto flex-1 flex flex-col h-full min-h-0 overflow-hidden px-2 sm:px-4 pt-1 pb-1">
       {/* Queue Header */}
-      <div className="flex items-center justify-between pb-3 shrink-0 border-b border-white/10">
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between pb-2 shrink-0 border-b border-white/10 px-1">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
           <Music2 className="w-4 h-4 shrink-0" style={{ color: themeColors.accent }} />
-          <span className="text-sm font-bold truncate">Playback Queue ({queue.length})</span>
+          <div className="min-w-0">
+            <span className="text-xs sm:text-sm font-bold truncate block">
+              Queue ({queue.length} {queue.length === 1 ? 'track' : 'tracks'})
+            </span>
+            <span className="text-[10px] opacity-50 block font-medium">
+              {totalMins > 0 ? `${totalMins} min total` : ''} • Currently #{queueIndex + 1}
+            </span>
+          </div>
         </div>
-        {queue.length > 1 && (
+
+        <div className="flex items-center gap-1.5 shrink-0">
           <button
-            onClick={clearQueue}
-            className="text-xs text-red-400 hover:text-red-300 transition flex items-center gap-1 font-semibold px-2 py-1 rounded-lg hover:bg-white/5 active:scale-95"
+            onClick={handleScrollToCurrent}
+            className="p-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-white/70 hover:text-white transition active:scale-95"
+            title="Scroll to currently playing track"
           >
-            <Trash2 className="w-3.5 h-3.5" /> Clear
+            <LocateFixed className="w-3.5 h-3.5" />
           </button>
-        )}
+
+          {queue.length > 1 && (
+            <button
+              onClick={clearQueue}
+              className="text-[11px] text-red-400 hover:text-red-300 transition flex items-center gap-1 font-semibold px-2 py-1 rounded-xl bg-white/5 hover:bg-red-500/10 active:scale-95 border border-white/5"
+            >
+              <Trash2 className="w-3 h-3" /> Clear
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Queue List */}
-      <div className="flex-1 overflow-y-auto mt-3 space-y-2.5 no-scrollbar pb-32 max-h-full">
+      {/* Queue List - Optimized for mobile viewport */}
+      <div
+        ref={listContainerRef}
+        className="flex-1 overflow-y-auto mt-2 space-y-1.5 no-scrollbar pb-6 overscroll-contain"
+      >
         {queue.map((song, idx) => {
           const isCurrent = idx === queueIndex;
           return (
             <div
               key={`${song.id}-${idx}`}
+              ref={isCurrent ? activeItemRef : null}
               onClick={() => {
                 hapticFeedback();
                 playSong(song);
               }}
-              className={`flex items-center justify-between p-2.5 rounded-2xl shrink-0 transition cursor-pointer active:scale-[0.99] ${
+              className={`flex items-center justify-between p-2 rounded-2xl transition cursor-pointer active:scale-[0.99] w-full border ${
                 isCurrent
-                  ? 'bg-white/12 shadow-lg border border-white/15'
-                  : 'hover:bg-white/5 bg-white/[0.02] opacity-85 hover:opacity-100'
+                  ? 'bg-white/15 shadow-lg border-white/25'
+                  : 'hover:bg-white/10 bg-white/[0.03] opacity-80 hover:opacity-100 border-white/5'
               }`}
             >
-              <div className="flex items-center gap-3 min-w-0 flex-1">
-                <div className="relative w-11 h-11 rounded-xl overflow-hidden shrink-0 shadow-md">
+              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                {/* Track Number / Playing Icon */}
+                <div className="w-5 text-center shrink-0 flex items-center justify-center">
+                  {isCurrent ? (
+                    <Volume2 className="w-3.5 h-3.5 animate-pulse" style={{ color: themeColors.accent }} />
+                  ) : (
+                    <span className="text-[10px] font-mono opacity-40 font-semibold">{idx + 1}</span>
+                  )}
+                </div>
+
+                {/* Cover Art */}
+                <div className="relative w-10 h-10 rounded-xl overflow-hidden shrink-0 shadow-md">
                   <img src={song.thumbnailUrl} alt={song.title} className="w-full h-full object-cover" />
                   {isCurrent && (
                     <div
-                      className="absolute inset-0 bg-black/50 backdrop-blur-[1px] flex items-center justify-center text-white"
+                      className="absolute inset-0 bg-black/40 backdrop-blur-[1px] flex items-center justify-center"
                       style={{ color: themeColors.accent }}
                     >
-                      <Play className="w-4 h-4 fill-current" />
+                      <Play className="w-3.5 h-3.5 fill-current" />
                     </div>
                   )}
                 </div>
 
-                <div className="min-w-0 flex-1 pr-2">
+                {/* Track Details */}
+                <div className="min-w-0 flex-1 pr-1">
                   <div
-                    className={`text-sm truncate leading-tight ${
-                      isCurrent ? 'font-bold' : 'font-semibold'
+                    className={`text-xs sm:text-sm truncate leading-tight ${
+                      isCurrent ? 'font-black' : 'font-semibold'
                     }`}
                     style={{ color: isCurrent ? themeColors.accent : undefined }}
                   >
                     {song.title}
                   </div>
-                  <div className="text-xs opacity-60 truncate mt-1 font-medium">{song.artist}</div>
+                  <div className="text-[10px] sm:text-[11px] opacity-60 truncate mt-0.5 font-medium">
+                    {song.artist}
+                  </div>
                 </div>
               </div>
 
-              <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+              {/* Actions */}
+              <div className="flex items-center gap-1 shrink-0 ml-1" onClick={(e) => e.stopPropagation()}>
+                <span className="text-[10px] font-mono opacity-40 min-w-[28px] text-right">
+                  {Math.floor((song.duration || 180) / 60)}:
+                  {((song.duration || 180) % 60).toString().padStart(2, '0')}
+                </span>
+
                 {queue.length > 1 && (
                   <button
                     onClick={() => removeFromQueue(idx)}
-                    className="p-2 rounded-xl opacity-40 hover:opacity-100 hover:text-red-400 hover:bg-red-500/10 transition active:scale-95"
+                    className="p-1.5 rounded-lg opacity-40 hover:opacity-100 hover:text-red-400 hover:bg-red-500/10 transition active:scale-95"
                     title="Remove from queue"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 )}
-                <div className="p-2 opacity-30 cursor-grab">
-                  <GripVertical className="w-4 h-4" />
-                </div>
               </div>
             </div>
           );

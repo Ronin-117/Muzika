@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useMusic } from '../../context/MusicContext';
-import { ArrowLeft, Play, Shuffle, Disc, Heart, CheckCircle2, Bookmark, Check } from 'lucide-react';
+import { ArrowLeft, Play, Shuffle, Disc, Heart, CheckCircle2, Bookmark, Check, Loader2, DownloadCloud } from 'lucide-react';
+import { OnlineMusicService } from '../../services/onlineMusicService';
+import { Song } from '../../types/music';
 
 export const AlbumDetailModal: React.FC = () => {
   const {
@@ -12,21 +14,77 @@ export const AlbumDetailModal: React.FC = () => {
     isLiked,
     hapticFeedback,
     isSongCached,
+    cacheSong,
+    removeCachedSong,
     toggleSaveAlbum,
     isAlbumSaved,
   } = useMusic();
 
+  const [fetchedSongs, setFetchedSongs] = useState<Song[]>([]);
+  const [isLoadingTracks, setIsLoadingTracks] = useState(false);
+
+  useEffect(() => {
+    if (!selectedAlbum) {
+      setFetchedSongs([]);
+      return;
+    }
+
+    if (selectedAlbum.songs && selectedAlbum.songs.length > 0) {
+      setFetchedSongs(selectedAlbum.songs);
+      setIsLoadingTracks(false);
+      return;
+    }
+
+    // Fetch verified YouTube Music album tracks dynamically
+    let isMounted = true;
+    setIsLoadingTracks(true);
+    OnlineMusicService.fetchAlbumTracks(selectedAlbum.id)
+      .then((songs) => {
+        if (isMounted) {
+          setFetchedSongs(songs);
+          setIsLoadingTracks(false);
+        }
+      })
+      .catch(() => {
+        if (isMounted) setIsLoadingTracks(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedAlbum?.id]);
+
   if (!selectedAlbum) return null;
 
+  const currentSongs = fetchedSongs.length > 0 ? fetchedSongs : selectedAlbum.songs;
   const saved = isAlbumSaved(selectedAlbum.id);
-  const totalDuration = selectedAlbum.songs.reduce((acc, s) => acc + (s.duration || 0), 0);
+  const totalDuration = currentSongs.reduce((acc, s) => acc + (s.duration || 0), 0);
   const totalMins = Math.floor(totalDuration / 60);
+
+  const handleBack = () => {
+    hapticFeedback();
+    if (typeof window !== 'undefined' && window.history.length > 1) {
+      window.history.back();
+    } else {
+      setSelectedAlbum(null);
+    }
+  };
 
   const handlePlayAll = (shuffle = false) => {
     hapticFeedback();
-    if (selectedAlbum.songs.length === 0) return;
-    const list = shuffle ? [...selectedAlbum.songs].sort(() => Math.random() - 0.5) : selectedAlbum.songs;
+    if (currentSongs.length === 0) return;
+    const list = shuffle ? [...currentSongs].sort(() => Math.random() - 0.5) : currentSongs;
     playSong(list[0], list);
+  };
+
+  const handleToggleCache = async (e: React.MouseEvent, song: Song) => {
+    e.stopPropagation();
+    hapticFeedback();
+    if (isSongCached(song.id)) {
+      await removeCachedSong(song.id);
+    } else {
+      await cacheSong(song);
+    }
   };
 
   return (
@@ -38,11 +96,9 @@ export const AlbumDetailModal: React.FC = () => {
       <div className="sticky top-0 z-20 px-4 py-3 flex items-center justify-between backdrop-blur-md border-b border-white/5">
         <div className="flex items-center gap-3 min-w-0 flex-1">
           <button
-            onClick={() => {
-              hapticFeedback();
-              setSelectedAlbum(null);
-            }}
+            onClick={handleBack}
             className="p-2 rounded-full hover:bg-white/10 transition"
+            title="Go back"
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
@@ -90,7 +146,7 @@ export const AlbumDetailModal: React.FC = () => {
             <div className="text-xs opacity-50 flex items-center justify-center gap-2 pt-1">
               <span>{selectedAlbum.year || 'Album'}</span>
               <span>•</span>
-              <span>{selectedAlbum.songs.length} tracks</span>
+              <span>{currentSongs.length} tracks</span>
               {totalMins > 0 && (
                 <>
                   <span>•</span>
@@ -105,14 +161,16 @@ export const AlbumDetailModal: React.FC = () => {
         <div className="flex items-center gap-2.5 justify-center">
           <button
             onClick={() => handlePlayAll(false)}
-            className="flex-1 py-3 px-3 rounded-2xl text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg transition active:scale-95"
+            disabled={currentSongs.length === 0}
+            className="flex-1 py-3 px-3 rounded-2xl text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg transition active:scale-95 disabled:opacity-40"
             style={{ backgroundColor: themeColors.accent }}
           >
             <Play className="w-4 h-4 fill-white" /> Play Album
           </button>
           <button
             onClick={() => handlePlayAll(true)}
-            className="py-3 px-3 rounded-2xl bg-white/10 hover:bg-white/15 text-white font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95 border border-white/5"
+            disabled={currentSongs.length === 0}
+            className="py-3 px-3 rounded-2xl bg-white/10 hover:bg-white/15 text-white font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95 border border-white/5 disabled:opacity-40"
           >
             <Shuffle className="w-4 h-4" /> Shuffle
           </button>
@@ -132,12 +190,17 @@ export const AlbumDetailModal: React.FC = () => {
         {/* Track List */}
         <div className="space-y-2">
           <div className="text-xs font-bold uppercase tracking-wider opacity-50 px-1">
-            Tracks ({selectedAlbum.songs.length})
+            Tracks ({currentSongs.length})
           </div>
 
-          {selectedAlbum.songs.length > 0 ? (
+          {isLoadingTracks ? (
+            <div className="py-10 flex flex-col items-center justify-center gap-2 text-white/50 text-xs">
+              <Loader2 className="w-6 h-6 animate-spin text-cyan-400" />
+              <span>Fetching album tracks from YouTube Music...</span>
+            </div>
+          ) : currentSongs.length > 0 ? (
             <div className="space-y-1.5">
-              {selectedAlbum.songs.map((song, idx) => {
+              {currentSongs.map((song, idx) => {
                 const liked = isLiked(song.id);
                 const cached = isSongCached(song.id);
                 return (
@@ -145,7 +208,7 @@ export const AlbumDetailModal: React.FC = () => {
                     key={song.id}
                     onClick={() => {
                       hapticFeedback();
-                      playSong(song, selectedAlbum.songs);
+                      playSong(song, currentSongs);
                     }}
                     className="flex items-center justify-between p-2.5 rounded-2xl bg-white/5 hover:bg-white/10 transition border border-white/5 cursor-pointer group active:scale-[0.99]"
                   >
@@ -178,17 +241,26 @@ export const AlbumDetailModal: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                      {/* Offline Cache Download Button */}
                       <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          hapticFeedback();
-                          toggleLike(song);
-                        }}
+                        onClick={(e) => handleToggleCache(e, song)}
+                        className={`p-1.5 rounded-full transition ${
+                          cached
+                            ? 'text-emerald-400 bg-emerald-500/10'
+                            : 'text-white/40 hover:text-white hover:bg-white/10'
+                        }`}
+                        title={cached ? 'Cached Offline' : 'Save for offline'}
+                      >
+                        {cached ? <CheckCircle2 className="w-4 h-4" /> : <DownloadCloud className="w-4 h-4" />}
+                      </button>
+
+                      <button
+                        onClick={() => toggleLike(song)}
                         className="p-1.5 rounded-full hover:bg-white/10 transition"
                       >
                         <Heart
-                          className={`w-4 h-4 ${
+                          className={`w-4 h-4 transition ${
                             liked ? 'fill-rose-500 text-rose-500' : 'text-white/40'
                           }`}
                         />
@@ -203,8 +275,9 @@ export const AlbumDetailModal: React.FC = () => {
               })}
             </div>
           ) : (
-            <div className="p-8 text-center text-xs opacity-50 bg-white/5 rounded-2xl">
-              No tracks in this album.
+            <div className="p-8 text-center text-xs opacity-50 bg-white/5 rounded-2xl flex flex-col items-center">
+              <Disc className="w-8 h-8 mb-2 opacity-30" />
+              <span>No tracks found for this album.</span>
             </div>
           )}
         </div>
