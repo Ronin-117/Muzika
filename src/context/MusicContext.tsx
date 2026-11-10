@@ -7,6 +7,7 @@ import {
   RepeatMode,
   EqualizerSettings,
   ThemeName,
+  ThemeColors,
   UserStats,
   LyricsData,
 } from '../types/music';
@@ -24,6 +25,7 @@ import {
 import { RiplaySqliteImporter, RiplayImportSummary } from '../services/riplaySqliteImporter';
 import { OnlineMusicService } from '../services/onlineMusicService';
 import { getSubAudibleAudioUri, audioFocusManager } from '../utils/audioWakeLock';
+import { extractDynamicPalette } from '../utils/colorExtractor';
 
 interface MusicContextType {
   // Current playback state
@@ -65,8 +67,8 @@ interface MusicContextType {
   setSelectedAlbum: (album: Album | null) => void;
 
   // Active navigation
-  activeTab: 'home' | 'explore' | 'search' | 'library' | 'rewind' | 'settings' | 'test';
-  setActiveTab: (tab: 'home' | 'explore' | 'search' | 'library' | 'rewind' | 'settings' | 'test') => void;
+  activeTab: 'home' | 'explore' | 'search' | 'library' | 'rewind' | 'settings';
+  setActiveTab: (tab: 'home' | 'explore' | 'search' | 'library' | 'rewind' | 'settings') => void;
 
   // Lyrics
   currentLyrics: LyricsData | null;
@@ -161,21 +163,21 @@ const MusicContext = createContext<MusicContextType | null>(null);
 
 export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   // Navigation & UI state with persistent refresh state
-  const [activeTab, setActiveTabState] = useState<'home' | 'explore' | 'search' | 'library' | 'rewind' | 'settings' | 'test'>(() => {
+  const [activeTab, setActiveTabState] = useState<'home' | 'explore' | 'search' | 'library' | 'rewind' | 'settings'>(() => {
     if (typeof window !== 'undefined') {
       const hash = window.location.hash.replace('#', '').toLowerCase();
-      if (['home', 'explore', 'search', 'library', 'rewind', 'settings', 'test'].includes(hash)) {
+      if (['home', 'explore', 'search', 'library', 'rewind', 'settings'].includes(hash)) {
         return hash as any;
       }
       const saved = localStorage.getItem('muzika_active_tab');
-      if (saved && ['home', 'explore', 'search', 'library', 'rewind', 'settings', 'test'].includes(saved)) {
+      if (saved && ['home', 'explore', 'search', 'library', 'rewind', 'settings'].includes(saved)) {
         return saved as any;
       }
     }
     return 'home';
   });
 
-  const setActiveTab = (tab: 'home' | 'explore' | 'search' | 'library' | 'rewind' | 'settings' | 'test') => {
+  const setActiveTab = (tab: 'home' | 'explore' | 'search' | 'library' | 'rewind' | 'settings') => {
     setActiveTabState(tab);
     if (typeof window !== 'undefined') {
       localStorage.setItem('muzika_active_tab', tab);
@@ -222,6 +224,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [userStats, setUserStats] = useState<UserStats>(() => StorageService.getUserStats());
   const [equalizerSettings, setEqSettings] = useState<EqualizerSettings>(() => StorageService.getEqualizer());
   const [theme, setThemeState] = useState<ThemeName>(() => StorageService.getTheme());
+  const [dynamicColors, setDynamicColors] = useState<ThemeColors | null>(null);
   const [sleepTimerSeconds, setSleepTimerSeconds] = useState<number | null>(null);
 
   // Offline Cache states (IndexedDB)
@@ -242,24 +245,8 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [savedArtists, setSavedArtists] = useState<Artist[]>(() => StorageService.getSavedArtists());
   const [savedAlbums, setSavedAlbums] = useState<Album[]>(() => StorageService.getSavedAlbums());
 
-  // Handle browser back button & history modal popping
+  // Handle browser back button modal closing
   useEffect(() => {
-    const hasOpenModal =
-      isPlayerOpen ||
-      isQueueOpen ||
-      isEqualizerOpen ||
-      isSleepTimerOpen ||
-      isSongInfoOpen ||
-      isPWAInstallModalOpen ||
-      isRiplayImportOpen ||
-      selectedPlaylist !== null ||
-      selectedArtistId !== null ||
-      selectedAlbum !== null;
-
-    if (hasOpenModal && typeof window !== 'undefined') {
-      window.history.pushState({ modalOpen: true }, '');
-    }
-
     const handlePopState = () => {
       if (isPlayerOpen) {
         setIsPlayerOpen(false);
@@ -301,11 +288,6 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         setIsPWAInstallModalOpen(false);
         return;
       }
-
-      // If no modals are open and activeTab is not home, go back to home
-      if (activeTab !== 'home') {
-        setActiveTab('home');
-      }
     };
 
     if (typeof window !== 'undefined') {
@@ -327,7 +309,6 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     selectedPlaylist,
     selectedArtistId,
     selectedAlbum,
-    activeTab,
   ]);
 
   useEffect(() => {
@@ -392,7 +373,22 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   isPlayingRef.current = isPlaying;
   const userPausedRef = useRef<boolean>(false);
 
-  const themeColors = useMemo(() => THEMES[theme] || THEMES.riplay, [theme]);
+  useEffect(() => {
+    if (theme === 'dynamic') {
+      let isMounted = true;
+      extractDynamicPalette(currentSong?.thumbnailUrl).then((palette) => {
+        if (isMounted) setDynamicColors(palette);
+      });
+      return () => { isMounted = false; };
+    } else {
+      setDynamicColors(null);
+    }
+  }, [theme, currentSong?.thumbnailUrl]);
+
+  const themeColors = useMemo(() => {
+    if (theme === 'dynamic' && dynamicColors) return dynamicColors;
+    return THEMES[theme] || THEMES.riplay;
+  }, [theme, dynamicColors]);
 
   // Initialize Hardware Audio Wake-Lock Carrier Loop
   useEffect(() => {
@@ -792,14 +788,16 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     );
   };
 
-  const playIndex = async (index: number, startAtSecond?: number) => {
-    if (index < 0 || index >= queue.length) return;
-    const song = queue[index];
+  const playIndex = async (index: number, startAtSecond?: number, overrideQueue?: Song[], overrideSong?: Song) => {
+    const activeQueue = overrideQueue || queueRef.current;
+    if (index < 0 || index >= activeQueue.length) return;
+    const song = overrideSong || activeQueue[index];
+    if (!song) return;
 
     // Check blacklist: if blacklisted, try skip to next
     if (isBlacklisted(song)) {
-      if (index + 1 < queue.length) {
-        playIndex(index + 1);
+      if (index + 1 < activeQueue.length) {
+        playIndex(index + 1, 0, activeQueue);
         return;
       }
     }
@@ -807,8 +805,12 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     userPausedRef.current = false;
     audioFocusManager.start();
     const startPos = typeof startAtSecond === 'number' ? startAtSecond : 0;
+    setQueue(activeQueue);
+    queueRef.current = activeQueue;
     setQueueIndex(index);
+    queueIndexRef.current = index;
     setCurrentSong(song);
+    currentSongRef.current = song;
     setCurrentTime(startPos);
     setDuration(song.duration || 180);
     setIsPlaying(true);
@@ -878,20 +880,32 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     hapticFeedback();
     userPausedRef.current = false;
     audioFocusManager.start();
+
+    let newQueue: Song[];
+    let targetIndex: number;
+
     if (customQueue && customQueue.length > 0) {
-      setQueue(customQueue);
-      const idx = customQueue.findIndex((s) => s.id === song.id);
-      playIndex(idx !== -1 ? idx : 0);
+      newQueue = customQueue;
+      targetIndex = customQueue.findIndex((s) => s.id === song.id);
+      if (targetIndex === -1) {
+        newQueue = [song, ...customQueue];
+        targetIndex = 0;
+      }
     } else {
-      const existingIdx = queue.findIndex((s) => s.id === song.id);
+      const currentQ = queueRef.current;
+      const existingIdx = currentQ.findIndex((s) => s.id === song.id);
       if (existingIdx !== -1) {
-        playIndex(existingIdx);
+        newQueue = currentQ;
+        targetIndex = existingIdx;
       } else {
-        const newQueue = [...queue, song];
-        setQueue(newQueue);
-        playIndex(newQueue.length - 1);
+        newQueue = [song, ...currentQ];
+        targetIndex = 0;
       }
     }
+
+    setQueue(newQueue);
+    queueRef.current = newQueue;
+    playIndex(targetIndex, 0, newQueue, song);
   };
 
   const togglePlay = () => {

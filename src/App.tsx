@@ -15,7 +15,6 @@ import { SearchScreen } from './components/screens/SearchScreen';
 import { LibraryScreen } from './components/screens/LibraryScreen';
 import { RewindScreen } from './components/screens/RewindScreen';
 import { SettingsScreen } from './components/screens/SettingsScreen';
-import { TestScreen } from './components/screens/TestScreen';
 import { PlaylistDetailModal } from './components/screens/PlaylistDetailModal';
 import { ArtistDetailModal } from './components/screens/ArtistDetailModal';
 import { AlbumDetailModal } from './components/screens/AlbumDetailModal';
@@ -66,7 +65,6 @@ function MuzikaApp() {
         {activeTab === 'search' && <SearchScreen />}
         {activeTab === 'library' && <LibraryScreen />}
         {activeTab === 'rewind' && <RewindScreen />}
-        {activeTab === 'test' && <TestScreen />}
         {activeTab === 'settings' && <SettingsScreen />}
       </main>
 

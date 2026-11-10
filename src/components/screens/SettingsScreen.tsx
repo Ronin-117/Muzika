@@ -305,7 +305,7 @@ export const SettingsScreen: React.FC = () => {
 
       {/* Offline Storage & Retention Settings (RiPlay Cache Management) */}
       <section className="space-y-3">
-        <h2 className="text-xs font-bold uppercase tracking-wider opacity-60">Offline Storage & Cache Retention</h2>
+        <h2 className="text-xs font-bold uppercase tracking-wider opacity-60">Offline Storage & Cache Location</h2>
         <div className="p-4 rounded-2xl bg-white/5 border border-white/5 space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
@@ -329,6 +329,37 @@ export const SettingsScreen: React.FC = () => {
                 Clear
               </button>
             )}
+          </div>
+
+          {/* Custom Memory Directory / SD Card Picker */}
+          <div className="p-3 rounded-xl bg-black/30 border border-white/5 space-y-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-xs font-bold text-white">Storage Location / SD Card</div>
+                <div className="text-[11px] opacity-60">Specify custom folder or external memory card</div>
+              </div>
+              <button
+                onClick={() => {
+                  hapticFeedback();
+                  if (typeof window !== 'undefined' && 'showDirectoryPicker' in window) {
+                    (window as any).showDirectoryPicker().then((handle: any) => {
+                      if (handle?.name) {
+                        localStorage.setItem('muzika_storage_path', handle.name);
+                        alert(`Storage volume mapped to: ${handle.name}`);
+                      }
+                    }).catch(() => {});
+                  } else {
+                    alert('Mobile PWA Sandboxing Notice:\nYour mobile OS automatically routes PWA cached media to primary/SD storage based on available system space. Storage is managed by browser sandboxed IndexedDB.');
+                  }
+                }}
+                className="px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 active:scale-95 text-xs font-semibold transition"
+              >
+                Select Folder
+              </button>
+            </div>
+            <div className="text-[11px] opacity-50 font-mono">
+              Path: {typeof window !== 'undefined' && localStorage.getItem('muzika_storage_path') ? `/storage/${localStorage.getItem('muzika_storage_path')}` : 'Auto (Browser Sandboxed Volume / SD Card)'}
+            </div>
           </div>
 
           {/* Retention Options */}

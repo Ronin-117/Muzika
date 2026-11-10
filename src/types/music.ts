@@ -82,7 +82,7 @@ export interface EqualizerSettings {
   bassBoost: number; // 0 to 100
 }
 
-export type ThemeName = 'riplay' | 'amoled' | 'spotify' | 'cyan' | 'purple';
+export type ThemeName = 'riplay' | 'amoled' | 'spotify' | 'cyan' | 'purple' | 'dynamic';
 
 export interface ThemeColors {
   name: ThemeName;

@@ -56,4 +56,15 @@ export const THEMES: Record<ThemeName, ThemeColors> = {
     text: '#faf5ff',
     textSecondary: '#c084fc',
   },
+  dynamic: {
+    name: 'dynamic',
+    label: 'Dynamic Art (Adaptive)',
+    accent: '#DE6433',
+    accentHover: '#ff773d',
+    background0: '#08080a',
+    background1: '#141419',
+    background2: '#20202a',
+    text: '#ffffff',
+    textSecondary: '#a0a0aa',
+  },
 };

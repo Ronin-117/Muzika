@@ -1,6 +1,6 @@
 import React from 'react';
 import { useMusic } from '../../context/MusicContext';
-import { Home, Search, Library, FlaskConical, Settings } from 'lucide-react';
+import { Home, Search, Library, Settings } from 'lucide-react';
 
 export const BottomNav: React.FC = () => {
   const { activeTab, setActiveTab, themeColors, hapticFeedback } = useMusic();
@@ -9,7 +9,6 @@ export const BottomNav: React.FC = () => {
     { id: 'home', label: 'Home', icon: Home },
     { id: 'search', label: 'Search', icon: Search },
     { id: 'library', label: 'Library', icon: Library },
-    { id: 'test', label: 'Test Suite', icon: FlaskConical },
     { id: 'settings', label: 'Settings', icon: Settings },
   ] as const;
 
