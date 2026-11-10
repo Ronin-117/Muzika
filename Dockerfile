@@ -1,7 +1,7 @@
 # ==========================================
-# Stage 1: Build the React + Vite PWA application
+# Stage 1: Build the React + Vite PWA application (Native host architecture for speed)
 # ==========================================
-FROM node:20-alpine AS builder
+FROM --platform=$BUILDPLATFORM node:20-alpine AS builder
 
 WORKDIR /app
 
@@ -15,7 +15,7 @@ COPY . .
 # Ensure sql.js WebAssembly binary is present in public/
 RUN cp node_modules/sql.js/dist/sql-wasm.wasm public/sql-wasm.wasm 2>/dev/null || true
 
-# Build the production PWA bundle
+# Build the production PWA bundle and bundled Node server
 RUN npm run build
 
 # ==========================================
@@ -29,13 +29,12 @@ ENV PORT=80
 
 COPY package*.json ./
 
-# Reuse node_modules from builder stage (avoids peer dependency conflicts and second install)
-COPY --from=builder /app/node_modules ./node_modules
+# Install only production dependencies for lightweight execution
+RUN npm install --only=production --legacy-peer-deps
+
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/src ./src
-COPY server.ts ./
-COPY tsconfig.json ./
 
 EXPOSE 80
 
@@ -43,5 +42,5 @@ EXPOSE 80
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD wget --quiet --tries=1 --spider "http://127.0.0.1:${PORT:-80}/api/health" || exit 1
 
-# Start Muzika full-stack server using node
-CMD ["node", "./node_modules/tsx/dist/cli.mjs", "server.ts"]
+# Start Muzika full-stack server using compiled JavaScript bundle
+CMD ["node", "dist/server.js"]

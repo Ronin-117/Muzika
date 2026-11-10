@@ -364,7 +364,7 @@ async function startServer() {
     app.use(vite.middlewares);
     console.log('[Server] Vite middleware mounted in dev mode');
   } else {
-    const distPath = path.resolve(__dirname, 'dist');
+    const distPath = path.basename(__dirname) === 'dist' ? __dirname : path.resolve(__dirname, 'dist');
     app.use(express.static(distPath));
     app.get('*', (_req: Request, res: Response) => {
       res.sendFile(path.join(distPath, 'index.html'));
