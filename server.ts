@@ -7,10 +7,23 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 const isProd = process.env.NODE_ENV === 'production';
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : (isProd ? 80 : 3000);
 
 app.use(express.json());
+
+// Request logger for container diagnostic transparency
+app.use((req: Request, res: Response, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    // Don't flood healthchecks if healthy, but log all page views and API requests
+    if (req.path !== '/api/health' || res.statusCode >= 400) {
+      console.log(`[HTTP] ${req.method} ${req.originalUrl || req.url} ${res.statusCode} - ${duration}ms`);
+    }
+  });
+  next();
+});
 
 // Silence verbose [YOUTUBEJS] internal parser warnings in production logs
 const origWarn = console.warn;
@@ -87,13 +100,13 @@ app.get('/api/search', async (req: Request, res: Response) => {
         artist,
         duration: durationSeconds,
         thumbnailUrl,
-        source: 'stream',
+        source: 'youtube',
         youtubeId: vidId,
-        streamUrl: `/api/stream?id=${vidId}`,
         playCount: v.view_count?.text ? parseInt(v.view_count.text.replace(/[^0-9]/g, ''), 10) || 0 : 0,
       };
     });
 
+    console.log(`[Search] Query: "${query}" -> ${results.length} full-length tracks found`);
     searchCache.set(cacheKey, { data: results, timestamp: Date.now() });
     return res.json(results);
   } catch (err: any) {

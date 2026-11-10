@@ -38,9 +38,9 @@ COPY tsconfig.json ./
 
 EXPOSE 80
 
-# Healthcheck to verify Muzika API is actively responding
-HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD wget --quiet --tries=1 --spider http://localhost:80/api/health || exit 1
+# Healthcheck to verify Muzika API is actively responding (supports both IPv4 and dynamic PORT env var)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget --quiet --tries=1 --spider "http://127.0.0.1:${PORT:-80}/api/health" || exit 1
 
-# Start Muzika full-stack server using local tsx binary
-CMD ["./node_modules/.bin/tsx", "server.ts"]
+# Start Muzika full-stack server using node
+CMD ["node", "./node_modules/tsx/dist/cli.mjs", "server.ts"]

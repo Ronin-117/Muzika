@@ -50,6 +50,8 @@ export class YouTubeController {
   private timePoller: number | null = null;
   private callbacks: YTPlayerCallbacks;
   private elementId: string;
+  private pendingVideo: { videoId: string; startSeconds: number; autoplay: boolean } | null = null;
+  private isReady = false;
 
   constructor(elementId: string, callbacks: YTPlayerCallbacks) {
     this.elementId = elementId;
@@ -66,24 +68,38 @@ export class YouTubeController {
         return resolve();
       }
 
+      const playerVars: Record<string, any> = {
+        autoplay: 0,
+        controls: 0,
+        disablekb: 1,
+        fs: 0,
+        modestbranding: 1,
+        playsinline: 1, // Crucial for mobile inline playback
+        rel: 0,
+      };
+
+      if (typeof window !== 'undefined' && window.location?.origin && !window.location.origin.startsWith('file:')) {
+        playerVars.origin = window.location.origin;
+      }
+
       this.player = new window.YT.Player(this.elementId, {
         height: '100%',
         width: '100%',
         videoId: initialVideoId,
-        playerVars: {
-          autoplay: 0,
-          controls: 0,
-          disablekb: 1,
-          fs: 0,
-          modestbranding: 1,
-          playsinline: 1, // Crucial for mobile inline playback
-          rel: 0,
-          origin: window.location.origin,
-        },
+        playerVars,
         events: {
           onReady: () => {
             ytPlayerInstance = this.player;
+            this.isReady = true;
             this.startTimePoller();
+            if (this.pendingVideo) {
+              const pending = this.pendingVideo;
+              this.pendingVideo = null;
+              this.loadVideoById(pending.videoId, pending.startSeconds);
+              if (pending.autoplay) {
+                this.play();
+              }
+            }
             resolve();
           },
           onStateChange: (e: any) => {
@@ -114,7 +130,8 @@ export class YouTubeController {
   }
 
   loadVideoById(videoId: string, startSeconds = 0) {
-    if (!this.player || typeof this.player.loadVideoById !== 'function') {
+    if (!this.player || !this.isReady || typeof this.player.loadVideoById !== 'function') {
+      this.pendingVideo = { videoId, startSeconds, autoplay: true };
       return;
     }
     try {

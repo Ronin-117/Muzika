@@ -233,10 +233,9 @@ export class OnlineMusicService {
         const hit = results?.[0];
         if (hit && hit.youtubeId) {
           song.youtubeId = hit.youtubeId;
+          song.source = 'youtube';
           if (hit.duration > 30) song.duration = hit.duration;
-          const fullAudioStream = `/api/stream?id=${hit.youtubeId}`;
-          song.streamUrl = fullAudioStream;
-          return fullAudioStream;
+          return undefined;
         }
       }
     } catch {
