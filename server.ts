@@ -256,6 +256,24 @@ app.get('/api/stream', async (req: Request, res: Response) => {
         }
       }
 
+      // 2. Direct YouTube Music stream resolution via InnerTube if vidId exists
+      if (!resolvedUrl && vidId) {
+        try {
+          const yt = await getInnertube();
+          const info = await yt.getBasicInfo(vidId);
+          const format = info.chooseFormat({ quality: 'best', type: 'audio' });
+          if (format) {
+            const deciphered = await format.decipher(yt.session.player);
+            if (deciphered) {
+              resolvedUrl = deciphered;
+              mimeType = format.mime_type || 'audio/mp4';
+            }
+          }
+        } catch (ytErr: any) {
+          console.warn('YouTube Music decipher notice:', ytErr?.message || ytErr);
+        }
+      }
+
       if (resolvedUrl) {
         streamInfo = { url: resolvedUrl, mimeType, timestamp: Date.now() };
         streamCache.set(cacheKey, streamInfo);
@@ -271,7 +289,7 @@ app.get('/api/stream', async (req: Request, res: Response) => {
       // Proxy remote stream with HTTP Range support for HTML5 <audio> tag
       const range = req.headers.range;
       const fetchHeaders: Record<string, string> = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
       };
       if (range) {
         fetchHeaders['Range'] = range;
@@ -279,11 +297,15 @@ app.get('/api/stream', async (req: Request, res: Response) => {
 
       const streamResp = await fetch(streamInfo.url, { headers: fetchHeaders });
       if (streamResp.ok || streamResp.status === 206) {
-        res.status(streamResp.status);
-        res.setHeader('Content-Type', streamInfo.mimeType);
+        const statusCode = range || streamResp.status === 206 ? 206 : streamResp.status;
+        res.status(statusCode);
+        res.setHeader('Content-Type', streamInfo.mimeType || 'audio/mp4');
         res.setHeader('Accept-Ranges', 'bytes');
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+
         const contentRange = streamResp.headers.get('content-range');
         if (contentRange) res.setHeader('Content-Range', contentRange);
+
         const contentLength = streamResp.headers.get('content-length');
         if (contentLength) res.setHeader('Content-Length', contentLength);
 
