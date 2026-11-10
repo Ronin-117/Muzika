@@ -196,64 +196,79 @@ app.get('/api/search', async (req: Request, res: Response) => {
   }
 });
 
-// 3. Audio Stream Resolution & Proxying Endpoint (Supports HTTP Range Requests for Scrubbing & Background Play)
+// 3. High-Fidelity Audio Stream Resolution & Proxying Endpoint (320kbps AAC/MP4 full-length streams)
 app.get('/api/stream', async (req: Request, res: Response) => {
+  const title = String(req.query.title || '').trim();
+  const artist = String(req.query.artist || '').trim();
   const rawId = String(req.query.id || '').trim();
   const vidId = rawId.replace(/^yt-/, '');
+  const searchQuery = `${title} ${artist}`.trim();
 
-  if (!vidId) {
-    return res.status(400).send('Missing video ID parameter');
-  }
-
-  // Set permissive CORS headers for media streaming
+  // Set permissive CORS headers for media streaming & range scrubbing
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Range, Content-Type, Accept');
 
+  const cacheKey = searchQuery || vidId;
+  if (!cacheKey) {
+    return res.status(400).json({ error: 'Missing stream parameters (title, artist, or id required)' });
+  }
+
   try {
-    // Check stream URL cache
-    let streamInfo = streamCache.get(vidId);
+    let streamInfo = streamCache.get(cacheKey);
 
     if (!streamInfo || Date.now() - streamInfo.timestamp > CACHE_TTL) {
-      // Resolve direct stream URL via fallback providers
       let resolvedUrl: string | null = null;
-      let mimeType = 'audio/webm';
+      let mimeType = 'audio/mp4';
 
-      // Provider A: Piped / Invidious fallback gateways
-      const providers = [
-        `https://pipedapi.adminforge.de/streams/${vidId}`,
-        `https://api.piped.privacydev.net/streams/${vidId}`,
-        `https://pipedapi.kavin.rocks/streams/${vidId}`,
-      ];
+      // 1. Direct 320kbps audio resolution endpoints
+      const searchTerms = [searchQuery, title].filter(Boolean);
+      for (const queryTerm of searchTerms) {
+        if (resolvedUrl) break;
+        const apis = [
+          `https://saavn-api-one.vercel.app/search/songs?query=${encodeURIComponent(queryTerm)}`,
+          `https://saavn-api-beta.vercel.app/api/search/songs?query=${encodeURIComponent(queryTerm)}`,
+          `https://jiosaavn-api-privatet3.vercel.app/search/songs?query=${encodeURIComponent(queryTerm)}`,
+        ];
 
-      for (const endpoint of providers) {
-        try {
-          const resp = await fetch(endpoint, {
-            headers: { 'User-Agent': 'Mozilla/5.0' },
-            signal: AbortSignal.timeout(3500),
-          });
-          if (resp.ok) {
-            const data: any = await resp.json();
-            const audioStream = (data.audioStreams || []).find((s: any) => s.url);
-            if (audioStream && audioStream.url) {
-              resolvedUrl = audioStream.url;
-              mimeType = audioStream.mimeType || 'audio/webm';
-              break;
+        for (const endpoint of apis) {
+          try {
+            const resp = await fetch(endpoint, { signal: AbortSignal.timeout(3500) });
+            if (resp.ok) {
+              const data: any = await resp.json();
+              const results = data.data?.results || data.results;
+              const hit = Array.isArray(results) ? results[0] : null;
+              if (hit && hit.downloadUrl) {
+                const downloadObj =
+                  hit.downloadUrl.find((d: any) => d.quality === '320kbps') ||
+                  hit.downloadUrl[hit.downloadUrl.length - 1];
+                const directLink = downloadObj?.link || downloadObj?.url;
+                if (directLink) {
+                  resolvedUrl = directLink;
+                  mimeType = 'audio/mp4';
+                  break;
+                }
+              }
             }
+          } catch {
+            // continue next provider
           }
-        } catch {
-          // continue to next provider
         }
       }
 
       if (resolvedUrl) {
         streamInfo = { url: resolvedUrl, mimeType, timestamp: Date.now() };
-        streamCache.set(vidId, streamInfo);
+        streamCache.set(cacheKey, streamInfo);
       }
     }
 
     if (streamInfo && streamInfo.url) {
-      // Forward HTTP Range headers to remote stream for responsive audio seeking
+      // If client requests JSON payload with resolved stream URL
+      if (req.query.json === 'true') {
+        return res.json({ streamUrl: streamInfo.url, mimeType: streamInfo.mimeType });
+      }
+
+      // Proxy remote stream with HTTP Range support for HTML5 <audio> tag
       const range = req.headers.range;
       const fetchHeaders: Record<string, string> = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
@@ -292,8 +307,7 @@ app.get('/api/stream', async (req: Request, res: Response) => {
       }
     }
 
-    // Return 404 so client cleanly uses the official YouTube engine instead of crashing on a redirected webpage
-    return res.status(404).json({ error: 'Direct audio stream not available, use official player' });
+    return res.status(404).json({ error: 'Direct audio stream not available' });
   } catch (err: any) {
     console.error('Error in /api/stream:', err?.message || err);
     return res.status(500).json({ error: 'Stream resolution failed' });

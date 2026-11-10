@@ -838,41 +838,34 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         htmlAudioRef.current.play().catch(() => {});
         silentKeepAliveRef.current?.play().catch(() => {});
       }
-    }
-    // 2. YouTube tracks (official player engine for guaranteed full-length playback)
-    else if (song.source === 'youtube' || song.youtubeId || (song.id.length === 11 && !song.id.includes('/'))) {
-      activeEngineRef.current = 'youtube';
-      if (htmlAudioRef.current) {
-        htmlAudioRef.current.pause();
+    } else {
+      // 2. Resolve direct 320kbps full-length audio stream URL
+      const directStreamUrl = await OnlineMusicService.resolveStreamUrl(song);
+
+      if (directStreamUrl && htmlAudioRef.current) {
+        activeEngineRef.current = 'html';
+        if (ytControllerRef.current) ytControllerRef.current.pause();
+        if (htmlAudioRef.current.src !== directStreamUrl) {
+          htmlAudioRef.current.src = directStreamUrl;
+        }
+        if (startPos > 0) {
+          try {
+            htmlAudioRef.current.currentTime = startPos;
+          } catch {}
+        }
+        htmlAudioRef.current.play().catch(() => {});
+        silentKeepAliveRef.current?.play().catch(() => {});
+      } else {
+        // 3. Fallback: YouTube iframe engine
+        activeEngineRef.current = 'youtube';
+        if (htmlAudioRef.current) {
+          htmlAudioRef.current.pause();
+        }
+        const ytId = song.youtubeId || (song.id.startsWith('yt-') ? song.id.replace('yt-', '') : song.id);
+        ytControllerRef.current?.loadVideoById(ytId, startPos);
+        ytControllerRef.current?.play();
+        silentKeepAliveRef.current?.play().catch(() => {});
       }
-      const ytId = song.youtubeId || (song.id.startsWith('yt-') ? song.id.replace('yt-', '') : song.id);
-      ytControllerRef.current?.loadVideoById(ytId, startPos);
-      ytControllerRef.current?.play();
-      silentKeepAliveRef.current?.play().catch(() => {});
-    }
-    // 3. Direct valid audio stream (local user audio file or direct stream)
-    else if (song.streamUrl && !song.streamUrl.includes('/api/stream') && htmlAudioRef.current) {
-      activeEngineRef.current = 'html';
-      if (ytControllerRef.current) ytControllerRef.current.pause();
-      if (htmlAudioRef.current.src !== song.streamUrl) {
-        htmlAudioRef.current.src = song.streamUrl;
-      }
-      if (startPos > 0) {
-        try {
-          htmlAudioRef.current.currentTime = startPos;
-        } catch {}
-      }
-      htmlAudioRef.current.play().catch(() => {});
-      silentKeepAliveRef.current?.play().catch(() => {});
-    }
-    // 4. Default fallback: resolve via online service
-    else {
-      await OnlineMusicService.resolveStreamUrl(song);
-      activeEngineRef.current = 'youtube';
-      const ytId = song.youtubeId || (song.id.startsWith('yt-') ? song.id.replace('yt-', '') : song.id);
-      ytControllerRef.current?.loadVideoById(ytId, startPos);
-      ytControllerRef.current?.play();
-      silentKeepAliveRef.current?.play().catch(() => {});
     }
 
     // Auto-cache real audio stream in background if enabled

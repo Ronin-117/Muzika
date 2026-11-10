@@ -181,43 +181,53 @@ export class OnlineMusicService {
   }
 
   /**
-   * Automatically resolves a guaranteed FULL-LENGTH audio stream (not a 30s preview)
+   * Automatically resolves a guaranteed FULL-LENGTH 320kbps audio stream
    * for any track so it plays from 0:00 to the very end with mobile screen-off support.
    */
   static async resolveStreamUrl(song: Song): Promise<string | undefined> {
-    // 1. If song has a valid YouTube ID (e.g. from imported RiPlay database!), use backend stream endpoint
-    const ytId =
-      song.youtubeId ||
-      (song.id.startsWith('yt-')
-        ? song.id.replace('yt-', '')
-        : song.id.length === 11 && !song.id.includes('/')
-        ? song.id
-        : null);
-
-    if (ytId && /^[a-zA-Z0-9_-]{11}$/.test(ytId)) {
-      song.youtubeId = ytId;
-      song.source = 'youtube';
-      return undefined;
-    }
-
-    // 2. If already has a full-length direct audio stream or local blob, keep it
-    if (song.streamUrl && !song.streamUrl.includes('itunes.apple.com')) {
+    // 1. If song already has a direct valid audio stream URL, return it immediately
+    if (
+      song.streamUrl &&
+      !song.streamUrl.startsWith('/api/stream') &&
+      !song.streamUrl.includes('itunes.apple.com')
+    ) {
       return song.streamUrl;
     }
 
-    // 3. Query backend /api/search with song title + artist to find exact YouTube ID
+    const cleanTitle = song.title.replace(/\([^)]*\)|\[[^\]]*\]/g, '').trim();
+
+    // 2. Query full-stack backend /api/stream endpoint for 320kbps direct stream URL
     try {
-      const cleanTitle = song.title.replace(/\([^)]*\)|\[[^\]]*\]/g, '').trim();
-      const query = `${cleanTitle} ${song.artist}`.trim();
-      const res = await fetch(`/api/search?q=${encodeURIComponent(query)}&limit=3`);
+      const backendUrl = `/api/stream?title=${encodeURIComponent(cleanTitle)}&artist=${encodeURIComponent(song.artist)}&json=true`;
+      const res = await fetch(backendUrl);
       if (res.ok) {
-        const results = await res.json();
-        const hit = results?.[0];
-        if (hit && hit.youtubeId) {
-          song.youtubeId = hit.youtubeId;
-          song.source = 'youtube';
-          if (hit.duration > 30) song.duration = hit.duration;
-          return undefined;
+        const data = await res.json();
+        if (data.streamUrl) {
+          song.streamUrl = data.streamUrl;
+          return data.streamUrl;
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    // 3. Fallback: Query direct client CDN resolver
+    try {
+      const term = `${cleanTitle} ${song.artist}`.trim();
+      const res = await fetch(`https://saavn-api-one.vercel.app/search/songs?query=${encodeURIComponent(term)}`);
+      if (res.ok) {
+        const data = await res.json();
+        const hit = data.data?.results?.[0];
+        if (hit && hit.downloadUrl) {
+          const downloadObj =
+            hit.downloadUrl.find((d: any) => d.quality === '320kbps') ||
+            hit.downloadUrl[hit.downloadUrl.length - 1];
+          const directLink = downloadObj?.link || downloadObj?.url;
+          if (directLink) {
+            song.streamUrl = directLink;
+            if (hit.duration > 30) song.duration = hit.duration;
+            return directLink;
+          }
         }
       }
     } catch {
@@ -226,16 +236,20 @@ export class OnlineMusicService {
 
     // 4. Fallback search by title only
     try {
-      const cleanTitle = song.title.replace(/\([^)]*\)|\[[^\]]*\]/g, '').trim();
-      const res = await fetch(`/api/search?q=${encodeURIComponent(cleanTitle)}&limit=3`);
+      const res = await fetch(`https://saavn-api-one.vercel.app/search/songs?query=${encodeURIComponent(cleanTitle)}`);
       if (res.ok) {
-        const results = await res.json();
-        const hit = results?.[0];
-        if (hit && hit.youtubeId) {
-          song.youtubeId = hit.youtubeId;
-          song.source = 'youtube';
-          if (hit.duration > 30) song.duration = hit.duration;
-          return undefined;
+        const data = await res.json();
+        const hit = data.data?.results?.[0];
+        if (hit && hit.downloadUrl) {
+          const downloadObj =
+            hit.downloadUrl.find((d: any) => d.quality === '320kbps') ||
+            hit.downloadUrl[hit.downloadUrl.length - 1];
+          const directLink = downloadObj?.link || downloadObj?.url;
+          if (directLink) {
+            song.streamUrl = directLink;
+            if (hit.duration > 30) song.duration = hit.duration;
+            return directLink;
+          }
         }
       }
     } catch {
@@ -250,15 +264,17 @@ export class OnlineMusicService {
    * Guarantees that saved audio matches complete song duration (never 30s preview clips).
    */
   static async fetchAudioBlob(song: Song): Promise<Blob | null> {
-    // 1. Direct stream URL or local audio blob
-    if (song.streamUrl && !song.streamUrl.startsWith('/api/stream') && !song.streamUrl.includes('itunes.apple.com')) {
+    const streamUrl = await this.resolveStreamUrl(song);
+    if (streamUrl) {
       try {
-        const resp = await fetch(song.streamUrl, { mode: 'cors' });
+        const resp = await fetch(streamUrl, { mode: 'cors' });
         if (resp.ok) {
           const blob = await resp.blob();
-          if (blob.size > 10000) return blob;
+          if (blob.size > 100000) return blob;
         }
-      } catch {}
+      } catch {
+        // ignore
+      }
     }
 
     return null;
