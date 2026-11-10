@@ -2,6 +2,7 @@ import express, { Request, Response } from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { Innertube, ClientType, UniversalCache } from 'youtubei.js';
+import { APP_VERSION, APP_BUILD, APP_RELEASE_NAME } from './src/version';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -59,7 +60,9 @@ app.get('/api/health', (_req: Request, res: Response) => {
   res.json({
     status: 'ok',
     app: 'Muzika',
-    version: '2.5.0',
+    version: APP_VERSION,
+    build: APP_BUILD,
+    release: APP_RELEASE_NAME,
     uptime: Math.floor(process.uptime()),
     timestamp: Date.now(),
   });
@@ -356,7 +359,7 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[Muzika Server] Running on http://0.0.0.0:${PORT} (ENV: ${process.env.NODE_ENV || 'development'})`);
+    console.log(`[Muzika Server v${APP_VERSION} (${APP_BUILD})] Running on http://0.0.0.0:${PORT} (ENV: ${process.env.NODE_ENV || 'development'})`);
   });
 }
 

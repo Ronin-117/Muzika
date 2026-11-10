@@ -23,6 +23,7 @@ import { StorageService } from '../../services/storageService';
 import { usePWAInstall } from '../../hooks/usePWAInstall';
 import { RetentionDuration } from '../../services/offlineCacheService';
 import { pwaUpdater } from '../../utils/pwaUpdater';
+import { APP_VERSION, APP_BUILD, APP_RELEASE_NAME } from '../../version';
 
 export const SettingsScreen: React.FC = () => {
   const {
@@ -431,7 +432,7 @@ export const SettingsScreen: React.FC = () => {
         </div>
       </section>
 
-      {/* App Updates & Instant Refresh */}
+      {/* App Updates & Version Badge */}
       <section className="space-y-3">
         <h2 className="text-xs font-bold uppercase tracking-wider opacity-60">PWA Updates & Version</h2>
         <div className="p-4 rounded-2xl bg-white/5 border border-white/5 space-y-3">
@@ -441,8 +442,13 @@ export const SettingsScreen: React.FC = () => {
                 <RefreshCw className="w-4 h-4" />
               </div>
               <div>
-                <div className="text-sm font-bold text-white">Instant Auto-Updates</div>
-                <div className="text-[11px] opacity-60">No need to reinstall or delete from home screen</div>
+                <div className="text-sm font-bold text-white flex items-center gap-2">
+                  <span>Version {APP_VERSION}</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono">
+                    ACTIVE
+                  </span>
+                </div>
+                <div className="text-[11px] opacity-60">Build ID: {APP_BUILD}</div>
               </div>
             </div>
             <button
@@ -458,7 +464,7 @@ export const SettingsScreen: React.FC = () => {
           {updateStatus === 'up_to_date' && (
             <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 shrink-0" />
-              <span>You are running the absolute latest version!</span>
+              <span>You are running {APP_RELEASE_NAME} (latest build)</span>
             </div>
           )}
 
@@ -511,7 +517,7 @@ export const SettingsScreen: React.FC = () => {
           Muzika is built on top of the open-source architecture of <strong>RiPlay</strong> by fast4x. It runs as a full-featured Android PWA with YouTube stream integration, LRCLIB synchronized lyrics, 5-band equalizer, and strict privacy (zero data collection).
         </p>
         <div className="pt-2 border-t border-white/5 flex items-center justify-between text-[11px] opacity-40">
-          <span>Version 1.0.0 (Muzika)</span>
+          <span>{APP_RELEASE_NAME}</span>
           <span>GPL v3.0 Open Source</span>
         </div>
       </section>
