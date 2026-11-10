@@ -82,31 +82,108 @@ app.get('/api/search', async (req: Request, res: Response) => {
 
   try {
     const yt = await getInnertube();
-    const searchRes = await yt.search(query);
+    const results: any[] = [];
+    const seen = new Set<string>();
 
-    const items = (searchRes.videos || []).slice(0, limit);
-    const results = items.map((v: any) => {
-      const vidId = String(v.id || '');
-      const durationSeconds = v.duration?.seconds || 210;
-      const title = v.title?.text || 'Untitled Song';
-      const artist = v.author?.name || 'Unknown Artist';
-      const thumbnailUrl =
-        v.thumbnails?.[v.thumbnails.length - 1]?.url ||
-        `https://i.ytimg.com/vi/${vidId}/hqdefault.jpg`;
+    // 1. Primary search: YouTube Music dedicated songs catalog
+    try {
+      const songRes = await yt.music.search(query, { type: 'song' });
+      const songs = (songRes.songs as any)?.contents || [];
+      for (const item of songs) {
+        const vidId = String(item.id || '');
+        if (!vidId || seen.has(vidId)) continue;
+        seen.add(vidId);
 
-      return {
-        id: `yt-${vidId}`,
-        title,
-        artist,
-        duration: durationSeconds,
-        thumbnailUrl,
-        source: 'youtube',
-        youtubeId: vidId,
-        playCount: v.view_count?.text ? parseInt(v.view_count.text.replace(/[^0-9]/g, ''), 10) || 0 : 0,
-      };
-    });
+        const artist = Array.isArray(item.artists)
+          ? item.artists.map((a: any) => a.name).filter(Boolean).join(', ')
+          : (item.artist?.name || 'Unknown Artist');
+        const durationSeconds = item.duration?.seconds || 210;
+        const title = item.title || 'Untitled Song';
+        const thumbnailUrl =
+          item.thumbnails?.[item.thumbnails.length - 1]?.url ||
+          `https://i.ytimg.com/vi/${vidId}/hqdefault.jpg`;
 
-    console.log(`[Search] Query: "${query}" -> ${results.length} full-length tracks found`);
+        results.push({
+          id: `yt-${vidId}`,
+          title,
+          artist,
+          album: item.album?.name || undefined,
+          duration: durationSeconds,
+          thumbnailUrl,
+          source: 'youtube',
+          youtubeId: vidId,
+          playCount: 0,
+        });
+
+        if (results.length >= limit) break;
+      }
+    } catch (songErr: any) {
+      console.warn('YouTube Music songs search notice:', songErr?.message || songErr);
+    }
+
+    // 2. Secondary search: YouTube Music official music videos if results < limit
+    if (results.length < limit) {
+      try {
+        const vidRes = await yt.music.search(query, { type: 'video' });
+        const videos = (vidRes.videos as any)?.contents || [];
+        for (const item of videos) {
+          const vidId = String(item.id || '');
+          if (!vidId || seen.has(vidId)) continue;
+          seen.add(vidId);
+
+          const artist = Array.isArray(item.artists)
+            ? item.artists.map((a: any) => a.name).filter(Boolean).join(', ')
+            : (item.author?.name || 'Unknown Artist');
+          const durationSeconds = item.duration?.seconds || 210;
+          const title = item.title || 'Untitled Song';
+          const thumbnailUrl =
+            item.thumbnails?.[item.thumbnails.length - 1]?.url ||
+            `https://i.ytimg.com/vi/${vidId}/hqdefault.jpg`;
+
+          results.push({
+            id: `yt-${vidId}`,
+            title,
+            artist,
+            duration: durationSeconds,
+            thumbnailUrl,
+            source: 'youtube',
+            youtubeId: vidId,
+            playCount: 0,
+          });
+
+          if (results.length >= limit) break;
+        }
+      } catch (vidErr: any) {
+        console.warn('YouTube Music videos search notice:', vidErr?.message || vidErr);
+      }
+    }
+
+    // 3. Last fallback: General YouTube search only if YouTube Music returned 0 tracks
+    if (results.length === 0) {
+      const searchRes = await yt.search(query);
+      const items = (searchRes.videos || []).slice(0, limit);
+      for (const item of items) {
+        const v = item as any;
+        const vidId = String(v.id || '');
+        if (!vidId || seen.has(vidId)) continue;
+        seen.add(vidId);
+
+        results.push({
+          id: `yt-${vidId}`,
+          title: v.title?.text || v.title || 'Untitled Song',
+          artist: v.author?.name || v.author || 'Unknown Artist',
+          duration: v.duration?.seconds || 210,
+          thumbnailUrl:
+            v.thumbnails?.[v.thumbnails.length - 1]?.url ||
+            `https://i.ytimg.com/vi/${vidId}/hqdefault.jpg`,
+          source: 'youtube',
+          youtubeId: vidId,
+          playCount: 0,
+        });
+      }
+    }
+
+    console.log(`[Search] Query: "${query}" -> ${results.length} pure music tracks found`);
     searchCache.set(cacheKey, { data: results, timestamp: Date.now() });
     return res.json(results);
   } catch (err: any) {

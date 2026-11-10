@@ -22,7 +22,7 @@ import { AlbumDetailModal } from './components/screens/AlbumDetailModal';
 import { PWAUpdateToast } from './components/common/PWAUpdateToast';
 import { WifiOff } from 'lucide-react';
 
-function OfflineBadge() {
+function OfflineBanner() {
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
 
   useEffect(() => {
@@ -39,8 +39,8 @@ function OfflineBadge() {
   if (isOnline) return null;
 
   return (
-    <div className="fixed top-14 left-4 right-4 z-50 flex items-center justify-center gap-2 rounded-xl bg-amber-500/90 text-black py-2 px-3 text-xs font-bold shadow-lg backdrop-blur-md">
-      <WifiOff className="w-4 h-4" />
+    <div className="w-full bg-amber-500/15 border-b border-amber-500/30 text-amber-300 py-2 px-4 text-xs font-medium flex items-center justify-center gap-2 shrink-0 z-30">
+      <WifiOff className="w-3.5 h-3.5 shrink-0" />
       <span>Offline Mode — Cached & local tracks are playable</span>
     </div>
   );
@@ -55,10 +55,10 @@ function MuzikaApp() {
       style={{ backgroundColor: themeColors.background0, color: themeColors.text }}
     >
       <PWAUpdateToast />
-      <OfflineBadge />
 
       {/* Main Mobile App Shell */}
       <Header />
+      <OfflineBanner />
 
       <main className="flex-1 overflow-x-hidden">
         {activeTab === 'home' && <HomeScreen />}

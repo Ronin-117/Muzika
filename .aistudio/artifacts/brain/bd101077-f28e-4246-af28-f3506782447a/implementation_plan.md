@@ -1,122 +1,108 @@
-# Full-Length Background & Screen-Off Playback Architecture
+# Music-Only Search Catalog & Non-Intrusive Offline Flow
 
-Comprehensive plan to replace 30-second promotional samples with guaranteed full-length audio playback that remains active when the mobile screen is turned off, the app is backgrounded, or when running offline.
+Resolve non-music YouTube video clutter by routing queries through YouTube Music's dedicated song catalog (`yt.music.search`), and fix the offline banner positioning by converting it from a floating absolute overlay into an in-flow banner that naturally pushes content downward without obscuring navigation or library tabs.
 
 ## User Review & Critical Decisions
 
 > [!IMPORTANT]
-> **Why 30-Second Clips Happened**: The previous audio resolver used iTunes preview URLs, which are promotional 30-second song clips starting midway through the track. Meanwhile, YouTube iframe fallbacks provided full-length video but mobile Android/Chrome strictly kills background execution of iframes the second the screen is turned off.
->
-> **The Solution**: Full-length songs require an HTML5 native `<audio>` element supplied by a full-length direct audio stream. We will mount a full-stack Express server proxy (`/api/stream`) and multi-source stream resolver that pipes complete, unclipped audio streams (from 0:00 to end) directly into the app's native audio engine.
-
-- **Audio Engine Decision**: HTML5 `<audio>` supplied by a full-length server-side stream proxy (`/api/stream?id=...`) and direct full-audio resolvers.
-- **Offline Storage**: Cache the full audio stream in IndexedDB so previously played tracks can play anywhere without internet.
-- **Session Rewind**: Persist the exact second, track, and queue in local storage to resume effortlessly upon reopening the app.
+> Key design and architectural preferences confirmed during clarification:
+> - **Search Scope**: Search will strictly query and return songs, official tracks, and verified music releases via YouTube Music (`yt.music.search(query, { type: 'song' })`), eliminating gaming vlogs, podcasts, and general YouTube video clutter.
+> - **Offline Banner Flow**: The offline notification is converted from a fixed floating overlay (`fixed top-14`) to an in-flow component beneath the top navigation bar (`w-full`), pushing the `<main>` content container downward so all top tabs, buttons, and filters remain completely accessible and unblocked.
 
 ---
 
 ## 1. Overview & Core Concept
 
-- **What It Does**: Upgrades Muzika from short 30-second previews and fragile iframes to full-length audio streaming (3 to 6+ minutes) that plays seamlessly with the mobile screen locked or turned off.
-- **Target Audience / Mobile Context**: Mobile PWA users running Muzika from their home screen who want full uninterrupted music listening while walking, commuting, working out, or running other apps.
-- **Key Value**: 100% full songs from start to finish, guaranteed mobile lockscreen controls, persistent notifications that do not vanish when paused, and real offline caching with accurate megabyte sizes.
+- **What It Does**:
+  1. **Strict Music Search**: Switches `/api/search` from standard YouTube to YouTube Music's dedicated song database. Queries return genuine musical tracks, artists, album releases, and clean durations, filtering out generic non-music video content.
+  2. **In-Flow Offline Notification**: Converts the offline status banner into an organic header ribbon that smoothly expands when connection drops, preserving touch targets for Library tabs ("Playlists", "Songs", "Artists", "Albums", "Offline") and search controls.
+- **Target Audience / Persona**: Music enthusiasts who want a clean, ad-free mobile music player experience matching dedicated apps like RiPlay or Spotify, free from YouTube creator vlog clutter.
+- **Key Value**: Accurate music discovery without non-song distractions, and uninterrupted UI interaction during network transitions.
 
 ---
 
 ## 2. User Experience & Visual Design
 
-- **Audio Stream Loading & Indicators**:
-  - Mini Player and Full Player show true song duration (e.g., `3:45`, `4:12`) from start `0:00` without clipping.
-  - Active audio engine badge displays "Full Audio • Background Ready" with real bitrate indicator.
-  - Seeking and scrubbing works across the entire duration of the track.
-- **Lockscreen & Notification Bar Experience**:
-  - Android MediaSession displays complete song title, artist, album art, and accurate progress bar.
-  - Lockscreen controls (Play, Pause, Skip, Rewind 10s) stay persistent even when paused.
-  - Notification tray never disappears on pause.
-- **Offline Library & Cache Management**:
-  - Cached tracks show actual file sizes (e.g., `4.8 MB`, `6.2 MB`).
-  - One-tap download icon caches the complete track for offline mode.
-  - Auto-caching saves played tracks in the background.
+### Key User Flows
+
+1. **Searching for Artists & Tracks**:
+   - User types a query into the Search input (e.g., `"PewDiePie"`, `"The Weeknd"`, or `"Spider-Man"`).
+   - The backend queries YouTube Music's song catalog.
+   - The user sees exclusively musical tracks (e.g., official singles, soundtracks, and songs with artist credits and cover art) rather than gaming playthroughs or commentary vlogs.
+2. **Offline Experience**:
+   - When the user turns on Airplane Mode or loses connection, the offline ribbon smoothly slides down right beneath `<Header />`.
+   - The page content (Library tabs, Playlists, song lists) is pushed downward by 36px in the normal flex layout flow.
+   - All interactive buttons (e.g. "Offline Available Songs", "Playlists" tab, "Play Offline" action button) remain 100% visible and responsive to taps without any overlay occlusion.
+
+### Visual Styling & Accessibility
+
+- **Offline Ribbon**:
+  - `bg-amber-500/15 border-b border-amber-500/30 text-amber-300 py-2 px-4 text-xs font-medium`
+  - Subtle WifiOff icon with descriptive text: `"Offline Mode — Playing cached songs and local files"`.
+  - Conforms to WCAG AA contrast standards and preserves the 15% mobile sticky height budget.
+- **Search Result Cards**:
+  - Clean unboxed metadata with typographic separators (`Artist · Duration · YouTube Music`).
+  - High-resolution album square thumbnails (`rounded-lg`).
 
 ---
 
 ## 3. Key Product Decisions & Trade-Offs
 
-- **Decision 1: Full-Stack Express Server Proxy (`server.ts` + `/api/stream`)**:
-  - *Chosen Approach*: Convert dev setup to full-stack Express running on port 3000 (`tsx server.ts`) with Vite middlewares in development. The Express server provides `/api/stream` and `/api/resolve` endpoints that extract and stream full audio streams without client-side CORS or mobile iframe limitations.
-  - *Why*: Browsers block cross-origin scraping, and mobile OS freezes iframes. A server proxy streams clean chunks with proper `Content-Type: audio/webm` or `audio/mp4` directly into HTML5 `<audio>`.
-  - *Alternatives Considered*: Third-party public scrapers (Piped/Invidious) were tested and found to be unreliable or shut down; client-only iframes cannot bypass mobile OS screen-off throttling.
-
-- **Decision 2: Full-Length Catalog & Multi-Source Fallbacks**:
-  - *Chosen Approach*: Equip catalog tracks and fallback collections with verified full-length audio URLs (archive, public CDN, and full streaming feeds) so initial songs play full-length out of the box with zero setup.
-  - *Why*: Guarantees instant instant-play capability even if an external stream resolver experiences high latency.
-
-- **Decision 3: Chunked Full-Song IndexedDB Caching**:
-  - *Chosen Approach*: As the full song streams through HTML5 `<audio>`, cache the full audio blob into IndexedDB with its true byte count.
-  - *Why*: Eliminates repeat network requests and allows full-length offline playback when the device has no internet connection.
+- **Decision 1: YouTube Music (`yt.music.search`) vs. YouTube Regex Filtering**
+  - *Chosen Approach*: Use `yt.music.search(query, { type: 'song' })` in `server.ts` with a secondary fallback to `yt.music.search(query)` for official music releases.
+  - *Why*: YouTube Music's backend natively filters and categorizes millions of songs, albums, and artists, providing accurate music metadata, album artwork, and song durations. Attempting to filter general YouTube with keyword blacklists is fragile and misses obscure songs.
+  - *Fallback*: If a specific query yields no results under `{ type: 'song' }`, query `yt.music.search(query)` (which includes music videos and official audio) before falling back to title searches.
+- **Decision 2: Layout-Flow Banner vs Floating Sticky Pill**
+  - *Chosen Approach*: In-flow ribbon inserted in the root DOM directly between `<Header />` and `<main className="flex-1">`.
+  - *Why*: Floating elements (`fixed`) inevitably overlap content on varied mobile screen sizes and safe-area insets. Using flex layout flow (`flex flex-col`) guarantees that whenever the banner is rendered, `<main>` is pushed down naturally without layout shifts or covered buttons.
 
 ---
 
 ## 4. Technical Architecture & Data Strategy
 
+### System Component Diagram
+
 ```
-┌────────────────────────────────────────────────────────────────────────┐
-│                          Muzika Mobile PWA                             │
-│                                                                        │
-│  ┌───────────────────────┐            ┌─────────────────────────────┐  │
-│  │   UI Components       │            │  Persistent Audio Engine    │  │
-│  │ (MiniPlayer / Player) │ ─────────> │  <audio playsinline>        │  │
-│  └───────────────────────┘            └──────────────┬──────────────┘  │
-│             │                                        │                 │
-│             ▼                                        ▼                 │
-│  ┌───────────────────────┐            ┌─────────────────────────────┐  │
-│  │ Storage & Rewind      │            │ Android MediaSession        │  │
-│  │ (muzika_last_playback)│            │ (Persistent Lockscreen Tray)│  │
-│  └───────────────────────┘            └─────────────────────────────┘  │
-│             │                                        ▲                 │
-│             ▼                                        │                 │
-│  ┌───────────────────────┐                           │                 │
-│  │ IndexedDB Cache (v2)  │ ──────────────────────────┘                 │
-│  │ (Full Audio Blobs)    │ (Offline source)                            │
-│  └───────────────────────┘                                             │
-└──────────────────────────────────────┬─────────────────────────────────┘
-                                       │
-                                       ▼ HTTP Stream Request
-┌────────────────────────────────────────────────────────────────────────┐
-│                Full-Stack Express Server (Port 3000)                   │
-│                                                                        │
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │ GET /api/stream?id=:id                                            │  │
-│  │ Resolves & streams full-length audio chunks with range headers   │  │
-│  └──────────────────────────────────┬───────────────────────────────┘  │
-│                                     │                                  │
-│                                     ▼                                  │
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │ Full Audio Sources & Public Media CDNs (SoundCloud / Direct / YT)│  │
-│  └──────────────────────────────────────────────────────────────────┘  │
-└────────────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────┐
+│                          App.tsx                              │
+│  ┌─────────────────────────────────────────────────────────┐  │
+│  │ Header (Top Bar: Brand + Quick Actions)                 │  │
+│  └─────────────────────────────────────────────────────────┘  │
+│  ┌─────────────────────────────────────────────────────────┐  │
+│  │ In-Flow OfflineBanner (Renders conditionally, pushes main) │
+│  └─────────────────────────────────────────────────────────┘  │
+│  ┌─────────────────────────────────────────────────────────┐  │
+│  │ <main> Content (Library tabs, Search, Home, etc.)       │  │
+│  │   - LibraryScreen (Tabs completely unblocked!)          │  │
+│  │   - SearchScreen                                        │  │
+│  └─────────────────────────────────────────────────────────┘  │
+│  ┌─────────────────────────────────────────────────────────┐  │
+│  │ MiniPlayer & Bottom Navigation                          │  │
+│  └─────────────────────────────────────────────────────────┘  │
+└───────────────────────────────┬───────────────────────────────┘
+                                │ HTTP GET /api/search?q=...
+                                ▼
+┌───────────────────────────────────────────────────────────────┐
+│                    server.ts (Backend)                        │
+│  ┌─────────────────────────────────────────────────────────┐  │
+│  │  Innertube Instance (`getInnertube()`)                  │  │
+│  │  yt.music.search(query, { type: 'song' })               │  │
+│  │  Maps: title, artists, duration, thumbnail, youtubeId   │  │
+│  └─────────────────────────────────────────────────────────┘  │
+└───────────────────────────────────────────────────────────────┘
 ```
 
-### Key Implementation Steps
+### Component & File Strategy
 
-1. **Full-Stack Express Server Setup (`server.ts`)**:
-   - Create Express entry point with Vite middleware on port 3000 (`"dev": "tsx server.ts"`).
-   - Implement `/api/stream` endpoint with HTTP Range header support for seeking and uninterrupted background audio.
-   - Implement `/api/resolve` to return full-length audio stream metadata for any track.
-
-2. **Catalog & Stream Upgrade**:
-   - Update `INITIAL_SONGS` and mock playlists with full-length audio stream sources (3:00 - 5:00 minutes).
-   - Wire `OnlineMusicService` to query `/api/stream` and full streaming sources instead of 30-second iTunes preview clips.
-
-3. **Audio Engine Optimization in `MusicContext.tsx`**:
-   - Route all playback through the persistent HTML5 `<audio>` engine.
-   - Maintain AudioFocus and background playback wake lock with screen locked.
-   - Keep MediaSession notification card alive in paused state.
-
-4. **Full-Length Offline Cache (`offlineCacheService.ts`)**:
-   - Download and store complete audio streams (3 - 7 MB per full track).
-   - Ensure accurate megabyte counters in the Library screen.
-
-5. **Verification**:
-   - Verify full song playback length from 0:00 to 3:00+ minutes.
-   - Verify Android lockscreen notification persistence and background screen-off playback.
+1. **`server.ts`**:
+   - Update `/api/search` to call `yt.music.search(query, { type: 'song' })`.
+   - Parse `musicRes.songs?.contents` extracting `id`, `title`, `artists.map(a => a.name).join(', ')`, `duration.seconds`, and high-res thumbnail.
+   - Maintain in-memory caching (`searchCache`) and error logging.
+2. **`src/App.tsx`**:
+   - Refactor `OfflineBadge` into an in-flow `OfflineBanner`.
+   - Place between `<Header />` and `<main className="flex-1 overflow-x-hidden">`.
+   - Remove `fixed top-14 left-4 right-4 z-50` and replace with `w-full border-b ...` so content naturally reflows below it.
+3. **Verification**:
+   - Run compilation and typecheck (`compile_applet` and `lint_applet`).
+   - Test search with query `"pewdiepie"` and `"blinding lights"` to verify only music tracks are returned.
+   - Verify library tabs are completely unobstructed when offline.
