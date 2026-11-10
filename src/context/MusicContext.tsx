@@ -23,6 +23,7 @@ import {
 } from '../services/offlineCacheService';
 import { RiplaySqliteImporter, RiplayImportSummary } from '../services/riplaySqliteImporter';
 import { OnlineMusicService } from '../services/onlineMusicService';
+import { getSubAudibleAudioUri, audioFocusManager } from '../utils/audioWakeLock';
 
 interface MusicContextType {
   // Current playback state
@@ -393,13 +394,12 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   const themeColors = useMemo(() => THEMES[theme] || THEMES.riplay, [theme]);
 
-  // Initialize Silent Background Audio Wake-Lock Loop
+  // Initialize Hardware Audio Wake-Lock Carrier Loop
   useEffect(() => {
-    const silentAudio = new Audio(
-      'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA='
-    );
+    const carrierUri = getSubAudibleAudioUri();
+    const silentAudio = new Audio(carrierUri);
     silentAudio.loop = true;
-    silentAudio.volume = 0.0001;
+    silentAudio.volume = 0.02; // Threshold needed for Android AudioTrack mixer to keep hardware audio active
     (silentAudio as any).playsInline = true;
     silentAudio.setAttribute('playsinline', 'true');
     silentAudio.setAttribute('x-webkit-airplay', 'allow');
@@ -407,25 +407,29 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
     return () => {
       silentAudio.pause();
+      audioFocusManager.stop();
     };
   }, []);
 
-  // Synchronize Silent Audio Wake-Lock whenever playback is active
+  // Synchronize Audio Focus Wake-Lock whenever playback is active
   useEffect(() => {
     if (isPlaying) {
+      audioFocusManager.start();
       silentKeepAliveRef.current?.play().catch(() => {});
       if (typeof navigator !== 'undefined' && 'wakeLock' in navigator) {
         (navigator as any).wakeLock?.request('screen').catch(() => {});
       }
     } else {
       silentKeepAliveRef.current?.pause();
+      audioFocusManager.stop();
     }
   }, [isPlaying]);
 
   // Handle visibilitychange safeguard (prevent mobile OS from throttling background playback)
   useEffect(() => {
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden' && isPlayingRef.current && !userPausedRef.current) {
+      if (isPlayingRef.current && !userPausedRef.current) {
+        audioFocusManager.start();
         silentKeepAliveRef.current?.play().catch(() => {});
         if (activeEngineRef.current === 'html' && htmlAudioRef.current) {
           if (htmlAudioRef.current.paused) {
@@ -801,6 +805,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     }
 
     userPausedRef.current = false;
+    audioFocusManager.start();
     const startPos = typeof startAtSecond === 'number' ? startAtSecond : 0;
     setQueueIndex(index);
     setCurrentSong(song);
@@ -831,6 +836,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           } catch {}
         }
         htmlAudioRef.current.play().catch(() => {});
+        silentKeepAliveRef.current?.play().catch(() => {});
       }
     }
     // 2. YouTube tracks (official player engine for guaranteed full-length playback)
@@ -857,6 +863,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         } catch {}
       }
       htmlAudioRef.current.play().catch(() => {});
+      silentKeepAliveRef.current?.play().catch(() => {});
     }
     // 4. Default fallback: resolve via online service
     else {
@@ -877,6 +884,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const playSong = (song: Song, customQueue?: Song[]) => {
     hapticFeedback();
     userPausedRef.current = false;
+    audioFocusManager.start();
     if (customQueue && customQueue.length > 0) {
       setQueue(customQueue);
       const idx = customQueue.findIndex((s) => s.id === song.id);
@@ -903,6 +911,8 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     if (isPlaying) {
       // User explicitly requested pause
       userPausedRef.current = true;
+      audioFocusManager.stop();
+      silentKeepAliveRef.current?.pause();
       if (htmlAudioRef.current && activeEngineRef.current === 'html') {
         htmlAudioRef.current.pause();
       }
@@ -916,6 +926,8 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     } else {
       // User explicitly requested resume
       userPausedRef.current = false;
+      audioFocusManager.start();
+      silentKeepAliveRef.current?.play().catch(() => {});
       const resumePos = currentTime > 0 ? currentTime : 0;
 
       if (activeEngineRef.current === 'html' && htmlAudioRef.current?.src) {

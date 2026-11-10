@@ -246,6 +246,59 @@ export class OnlineMusicService {
   }
 
   /**
+   * Fetches real playable audio Blob for offline storage in IndexedDB
+   */
+  static async fetchAudioBlob(song: Song): Promise<Blob | null> {
+    // 1. Direct stream URL
+    if (song.streamUrl && !song.streamUrl.startsWith('/api/stream')) {
+      try {
+        const resp = await fetch(song.streamUrl, { mode: 'cors' });
+        if (resp.ok) {
+          const blob = await resp.blob();
+          if (blob.size > 1000) return blob;
+        }
+      } catch {}
+    }
+
+    // 2. Query iTunes for real high-fidelity stream blob
+    try {
+      const cleanTitle = song.title.replace(/\([^)]*\)|\[[^\]]*\]/g, '').trim();
+      const term = `${cleanTitle} ${song.artist}`.trim();
+      const res = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(term)}&entity=song&limit=1`);
+      if (res.ok) {
+        const data = await res.json();
+        const hit = data.results?.[0];
+        if (hit && hit.previewUrl) {
+          const audioResp = await fetch(hit.previewUrl);
+          if (audioResp.ok) {
+            const blob = await audioResp.blob();
+            if (blob.size > 1000) return blob;
+          }
+        }
+      }
+    } catch {}
+
+    // 3. Fallback: Query by title only
+    try {
+      const cleanTitle = song.title.replace(/\([^)]*\)|\[[^\]]*\]/g, '').trim();
+      const res = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(cleanTitle)}&entity=song&limit=1`);
+      if (res.ok) {
+        const data = await res.json();
+        const hit = data.results?.[0];
+        if (hit && hit.previewUrl) {
+          const audioResp = await fetch(hit.previewUrl);
+          if (audioResp.ok) {
+            const blob = await audioResp.blob();
+            if (blob.size > 1000) return blob;
+          }
+        }
+      }
+    } catch {}
+
+    return null;
+  }
+
+  /**
    * Fetches 100% synchronized LRC timestamped lyrics for any song via LRCLIB
    */
   static async fetchSyncedLyrics(song: Song): Promise<string | null> {
