@@ -16,6 +16,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Sanitize Docker Hub Username
+        id: docker_prep
+        run: |
+          RAW_USER="${{ secrets.DOCKERHUB_USERNAME }}"
+          LOWER_USER=$(echo "$RAW_USER" | tr '[:upper:]' '[:lower:]')
+          if [ -z "$LOWER_USER" ]; then
+            LOWER_USER="njytc001"
+          fi
+          echo "username=$LOWER_USER" >> $GITHUB_OUTPUT
+
       - name: Set up QEMU (Emulation for multi-platform architectures)
         uses: docker/setup-qemu-action@v3
 
@@ -25,7 +35,7 @@ jobs:
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          username: ${{ steps.docker_prep.outputs.username }}
           password: ${{ secrets.DOCKERHUB_TOKEN || secrets.DOCKERHUB_PASSWORD }}
 
       - name: Build and push multi-architecture Docker image
@@ -34,8 +44,10 @@ jobs:
           context: .
           push: true
           platforms: linux/amd64,linux/arm64
+          provenance: false
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/muzika:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/muzika:${{ github.sha }}
+            ${{ steps.docker_prep.outputs.username }}/muzika:latest
+            ${{ steps.docker_prep.outputs.username }}/muzika:${{ github.sha }}
+            ${{ steps.docker_prep.outputs.username }}/muzika:2.5.4
           cache-from: type=gha
           cache-to: type=gha,mode=max

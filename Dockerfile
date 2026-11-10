@@ -30,7 +30,7 @@ ENV PORT=80
 COPY package*.json ./
 
 # Install only production dependencies for lightweight execution
-RUN npm install --only=production --legacy-peer-deps
+RUN npm install --omit=dev --legacy-peer-deps
 
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/public ./public
