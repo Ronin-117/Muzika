@@ -4,6 +4,7 @@ import { INITIAL_ARTISTS } from '../../data/mockCatalog';
 import { ArrowLeft, Play, Users, Heart, UserPlus, Check, Loader2, Music } from 'lucide-react';
 import { OnlineMusicService } from '../../services/onlineMusicService';
 import { Song } from '../../types/music';
+import { SwipeableSongRow } from '../common/SwipeableSongRow';
 
 export const ArtistDetailModal: React.FC = () => {
   const {
@@ -184,41 +185,42 @@ export const ArtistDetailModal: React.FC = () => {
               {topSongs.map((song, idx) => {
                 const liked = isLiked(song.id);
                 return (
-                  <div
-                    key={song.id}
-                    onClick={() => {
-                      hapticFeedback();
-                      playSong(song, topSongs);
-                    }}
-                    className="flex items-center justify-between p-2.5 rounded-2xl bg-white/5 hover:bg-white/10 transition cursor-pointer group active:scale-[0.99]"
-                  >
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <span className="text-xs font-mono opacity-40 w-4 text-center">{idx + 1}</span>
-                      <div className="relative w-10 h-10 rounded-lg overflow-hidden shrink-0 shadow">
-                        <img src={song.thumbnailUrl} alt={song.title} className="w-full h-full object-cover" />
-                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
-                          <Play className="w-4 h-4 fill-white" />
+                  <SwipeableSongRow key={song.id} song={song}>
+                    <div
+                      onClick={() => {
+                        hapticFeedback();
+                        playSong(song, topSongs);
+                      }}
+                      className="flex items-center justify-between p-2.5 rounded-2xl bg-white/5 hover:bg-white/10 transition cursor-pointer group active:scale-[0.99]"
+                    >
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
+                        <span className="text-xs font-mono opacity-40 w-4 text-center">{idx + 1}</span>
+                        <div className="relative w-10 h-10 rounded-lg overflow-hidden shrink-0 shadow">
+                          <img src={song.thumbnailUrl} alt={song.title} className="w-full h-full object-cover" />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
+                            <Play className="w-4 h-4 fill-white" />
+                          </div>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm font-semibold truncate leading-tight text-white">{song.title}</div>
+                          <div className="text-xs opacity-60 truncate mt-0.5">{song.album || artist.name}</div>
                         </div>
                       </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="text-sm font-semibold truncate leading-tight text-white">{song.title}</div>
-                        <div className="text-xs opacity-60 truncate mt-0.5">{song.album || artist.name}</div>
+
+                      <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          onClick={() => toggleLike(song)}
+                          className="p-2 rounded-full hover:bg-white/10 transition"
+                        >
+                          <Heart
+                            className={`w-4 h-4 transition ${
+                              liked ? 'fill-rose-500 text-rose-500' : 'text-white/40'
+                            }`}
+                          />
+                        </button>
                       </div>
                     </div>
-
-                    <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        onClick={() => toggleLike(song)}
-                        className="p-2 rounded-full hover:bg-white/10 transition"
-                      >
-                        <Heart
-                          className={`w-4 h-4 transition ${
-                            liked ? 'fill-rose-500 text-rose-500' : 'text-white/40'
-                          }`}
-                        />
-                      </button>
-                    </div>
-                  </div>
+                  </SwipeableSongRow>
                 );
               })}
             </div>

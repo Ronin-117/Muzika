@@ -10,6 +10,7 @@ import {
   ThemeColors,
   UserStats,
   LyricsData,
+  NamedQueue,
 } from '../types/music';
 import { INITIAL_SONGS, INITIAL_PLAYLISTS } from '../data/mockCatalog';
 import { StorageService } from '../services/storageService';
@@ -95,6 +96,18 @@ interface MusicContextType {
   removeFromQueue: (index: number) => void;
   clearQueue: () => void;
   reorderQueue: (startIndex: number, endIndex: number) => void;
+
+  // Multiple Queues (Toggleable in Settings)
+  enableMultipleQueues: boolean;
+  setEnableMultipleQueues: (enabled: boolean) => void;
+  queues: NamedQueue[];
+  activeQueueId: string;
+  activeQueueName: string;
+  switchQueue: (queueId: string) => void;
+  createQueue: (name: string, songs?: Song[]) => void;
+  renameQueue: (queueId: string, newName: string) => void;
+  deleteQueue: (queueId: string) => void;
+  addPlaylistToQueue: (playlistOrSongs: Playlist | Song[], mode?: 'replace' | 'append' | 'next') => void;
 
   // User collections
   likedSongs: Song[];
@@ -263,6 +276,147 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   // Saved / Followed Library States
   const [savedArtists, setSavedArtists] = useState<Artist[]>(() => StorageService.getSavedArtists());
   const [savedAlbums, setSavedAlbums] = useState<Album[]>(() => StorageService.getSavedAlbums());
+
+  // Multiple Queues feature (Toggleable in Settings)
+  const [enableMultipleQueues, setEnableMultipleQueuesState] = useState<boolean>(() => StorageService.getEnableMultipleQueues());
+  const [activeQueueId, setActiveQueueIdState] = useState<string>(() => StorageService.getActiveQueueId());
+  const [queues, setQueuesState] = useState<NamedQueue[]>(() => {
+    const saved = StorageService.getNamedQueues();
+    if (saved && saved.length > 0) return saved;
+    return [
+      { id: 'queue-main', name: 'Main Queue', songs: queue, queueIndex: 0, createdAt: Date.now() },
+      { id: 'queue-workout', name: 'Workout Session', songs: [INITIAL_SONGS[1], INITIAL_SONGS[0]], queueIndex: 0, createdAt: Date.now() },
+      { id: 'queue-focus', name: 'Focus & Study', songs: [INITIAL_SONGS[2], INITIAL_SONGS[3]], queueIndex: 0, createdAt: Date.now() },
+    ];
+  });
+
+  const setEnableMultipleQueues = (enabled: boolean) => {
+    hapticFeedback();
+    setEnableMultipleQueuesState(enabled);
+    StorageService.saveEnableMultipleQueues(enabled);
+  };
+
+  const activeQueueName = useMemo(() => {
+    const q = queues.find((item) => item.id === activeQueueId);
+    return q ? q.name : 'Main Queue';
+  }, [queues, activeQueueId]);
+
+  // Keep current active queue in queues state synchronized
+  useEffect(() => {
+    if (!enableMultipleQueues) return;
+    setQueuesState((prev) => {
+      const idx = prev.findIndex((q) => q.id === activeQueueId);
+      if (idx === -1) {
+        const newQueueItem: NamedQueue = {
+          id: activeQueueId,
+          name: activeQueueId === 'queue-main' ? 'Main Queue' : 'Custom Queue',
+          songs: queue,
+          queueIndex,
+          createdAt: Date.now(),
+        };
+        const updated = [...prev, newQueueItem];
+        StorageService.saveNamedQueues(updated);
+        return updated;
+      }
+      const updated = [...prev];
+      updated[idx] = { ...updated[idx], songs: queue, queueIndex };
+      StorageService.saveNamedQueues(updated);
+      return updated;
+    });
+  }, [queue, queueIndex, activeQueueId, enableMultipleQueues]);
+
+  const switchQueue = (queueId: string) => {
+    hapticFeedback();
+    const target = queues.find((q) => q.id === queueId);
+    if (!target) return;
+
+    // Save current queue state
+    setQueuesState((prev) => {
+      const updated = prev.map((q) => {
+        if (q.id === activeQueueId) {
+          return { ...q, songs: queueRef.current, queueIndex: queueIndexRef.current || 0 };
+        }
+        return q;
+      });
+      StorageService.saveNamedQueues(updated);
+      return updated;
+    });
+
+    setActiveQueueIdState(queueId);
+    StorageService.saveActiveQueueId(queueId);
+
+    const targetSongs = target.songs && target.songs.length > 0 ? target.songs : INITIAL_SONGS;
+    const targetIdx = Math.min(target.queueIndex || 0, targetSongs.length - 1);
+    setQueue(targetSongs);
+    queueRef.current = targetSongs;
+    setQueueIndex(targetIdx);
+    queueIndexRef.current = targetIdx;
+
+    const targetSong = targetSongs[targetIdx] || targetSongs[0];
+    if (targetSong) {
+      playIndex(targetIdx, 0, targetSongs, targetSong);
+    }
+  };
+
+  const createQueue = (name: string, initialSongs?: Song[]) => {
+    hapticFeedback();
+    const newId = `queue-${Date.now()}`;
+    const songsToUse = initialSongs && initialSongs.length > 0 ? initialSongs : (currentSong ? [currentSong] : INITIAL_SONGS);
+    const newQueueItem: NamedQueue = {
+      id: newId,
+      name: name.trim() || 'New Queue',
+      songs: songsToUse,
+      queueIndex: 0,
+      createdAt: Date.now(),
+    };
+    setQueuesState((prev) => {
+      const updated = [...prev, newQueueItem];
+      StorageService.saveNamedQueues(updated);
+      return updated;
+    });
+    switchQueue(newId);
+  };
+
+  const renameQueue = (queueId: string, newName: string) => {
+    hapticFeedback();
+    if (!newName.trim()) return;
+    setQueuesState((prev) => {
+      const updated = prev.map((q) => (q.id === queueId ? { ...q, name: newName.trim() } : q));
+      StorageService.saveNamedQueues(updated);
+      return updated;
+    });
+  };
+
+  const deleteQueue = (queueId: string) => {
+    hapticFeedback();
+    if (queueId === 'queue-main') return;
+    setQueuesState((prev) => {
+      const updated = prev.filter((q) => q.id !== queueId);
+      StorageService.saveNamedQueues(updated);
+      return updated;
+    });
+    if (activeQueueId === queueId) {
+      switchQueue('queue-main');
+    }
+  };
+
+  const addPlaylistToQueue = (playlistOrSongs: Playlist | Song[], mode: 'replace' | 'append' | 'next' = 'append') => {
+    hapticFeedback();
+    const songs = Array.isArray(playlistOrSongs) ? playlistOrSongs : playlistOrSongs.songs;
+    if (!songs || songs.length === 0) return;
+
+    if (mode === 'replace') {
+      playSong(songs[0], songs);
+    } else if (mode === 'next') {
+      setQueue((prev) => {
+        const newQ = [...prev];
+        newQ.splice(queueIndex + 1, 0, ...songs);
+        return newQ;
+      });
+    } else {
+      setQueue((prev) => [...prev, ...songs]);
+    }
+  };
 
   // Track latest navigation and modal states in a ref to avoid stale closures and re-binding loops
   const navStateRef = useRef({
@@ -1426,21 +1580,31 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const importRiplaySqliteBackup = async (file: File): Promise<RiplayImportSummary> => {
     hapticFeedback();
     const buffer = await file.arrayBuffer();
+    
+    // Yield to let UI update state before heavy parsing
+    await new Promise((r) => setTimeout(r, 10));
     const summary = await RiplaySqliteImporter.importFromDatabaseBuffer(buffer);
+    await new Promise((r) => setTimeout(r, 10));
 
-    // 1. Merge playlists (avoid duplicates by id or title)
+    // 1. Merge playlists (avoid duplicates by id or normalized title)
     setPlaylists((prev) => {
       const existingIds = new Set(prev.map((p) => p.id));
-      const newPlaylists = summary.importedPlaylists.filter((p) => !existingIds.has(p.id));
+      const existingTitles = new Set(prev.map((p) => (p.title || '').toLowerCase().trim()));
+      const newPlaylists = summary.importedPlaylists.filter(
+        (p) => !existingIds.has(p.id) && !existingTitles.has((p.title || '').toLowerCase().trim())
+      );
       const combined = [...newPlaylists, ...prev];
       StorageService.savePlaylists(combined);
       return combined;
     });
 
-    // 2. Merge liked songs
+    // 2. Merge liked songs (avoid duplicates by id or title+artist)
     setLikedSongs((prev) => {
       const existingIds = new Set(prev.map((s) => s.id));
-      const newLiked = summary.importedLikedSongs.filter((s) => !existingIds.has(s.id));
+      const existingKeys = new Set(prev.map((s) => `${(s.title || '').toLowerCase()}_${(s.artist || '').toLowerCase()}`));
+      const newLiked = summary.importedLikedSongs.filter(
+        (s) => !existingIds.has(s.id) && !existingKeys.has(`${(s.title || '').toLowerCase()}_${(s.artist || '').toLowerCase()}`)
+      );
       const combined = [...newLiked, ...prev];
       StorageService.saveLikedSongs(combined);
       return combined;
@@ -1468,18 +1632,24 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       });
     }
 
-    // 5. Save imported artists & albums into both imported and saved collections
+    // 5. Save imported artists & albums with deduplication
     if (summary.importedArtists.length > 0) {
       setImportedArtists((prev) => {
         const existingIds = new Set(prev.map((a) => a.id));
-        const newArtists = summary.importedArtists.filter((a) => !existingIds.has(a.id));
+        const existingNames = new Set(prev.map((a) => (a.name || '').toLowerCase().trim()));
+        const newArtists = summary.importedArtists.filter(
+          (a) => !existingIds.has(a.id) && !existingNames.has((a.name || '').toLowerCase().trim())
+        );
         const combined = [...prev, ...newArtists];
         StorageService.saveCustomArtists(combined);
         return combined;
       });
       setSavedArtists((prev) => {
         const existingIds = new Set(prev.map((a) => a.id));
-        const newArtists = summary.importedArtists.filter((a) => !existingIds.has(a.id));
+        const existingNames = new Set(prev.map((a) => (a.name || '').toLowerCase().trim()));
+        const newArtists = summary.importedArtists.filter(
+          (a) => !existingIds.has(a.id) && !existingNames.has((a.name || '').toLowerCase().trim())
+        );
         const combined = [...prev, ...newArtists];
         StorageService.saveSavedArtists(combined);
         return combined;
@@ -1489,21 +1659,27 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     if (summary.importedAlbums.length > 0) {
       setImportedAlbums((prev) => {
         const existingIds = new Set(prev.map((a) => a.id));
-        const newAlbums = summary.importedAlbums.filter((a) => !existingIds.has(a.id));
+        const existingTitles = new Set(prev.map((a) => (a.title || '').toLowerCase().trim()));
+        const newAlbums = summary.importedAlbums.filter(
+          (a) => !existingIds.has(a.id) && !existingTitles.has((a.title || '').toLowerCase().trim())
+        );
         const combined = [...prev, ...newAlbums];
         StorageService.saveCustomAlbums(combined);
         return combined;
       });
       setSavedAlbums((prev) => {
         const existingIds = new Set(prev.map((a) => a.id));
-        const newAlbums = summary.importedAlbums.filter((a) => !existingIds.has(a.id));
+        const existingTitles = new Set(prev.map((a) => (a.title || '').toLowerCase().trim()));
+        const newAlbums = summary.importedAlbums.filter(
+          (a) => !existingIds.has(a.id) && !existingTitles.has((a.title || '').toLowerCase().trim())
+        );
         const combined = [...prev, ...newAlbums];
         StorageService.saveSavedAlbums(combined);
         return combined;
       });
     }
 
-    // 6. Update user stats
+    // 6. Update user stats safely
     setUserStats((prev) => {
       const addedPlays = summary.importedSongs.reduce((acc, s) => acc + (s.playCount || 0), 0);
       const addedMinutes = Math.round(
@@ -1518,14 +1694,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       return updated;
     });
 
-    // 7. Auto-cache metadata and lyrics for offline playback
-    for (const song of summary.importedSongs.slice(0, 40)) {
-      if (song.lyrics) {
-        offlineCacheService.cacheSong(song).catch(() => {});
-      }
-    }
-
-    // 8. If queue is default or empty, switch to first imported playlist
+    // 7. If active queue is default or empty, switch to first imported playlist
     if (summary.importedPlaylists.length > 0 && summary.importedPlaylists[0].songs.length > 0) {
       const firstPl = summary.importedPlaylists[0];
       setQueue(firstPl.songs);
@@ -1644,6 +1813,16 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         savedAlbums,
         toggleSaveAlbum,
         isAlbumSaved,
+        enableMultipleQueues,
+        setEnableMultipleQueues,
+        queues,
+        activeQueueId,
+        activeQueueName,
+        switchQueue,
+        createQueue,
+        renameQueue,
+        deleteQueue,
+        addPlaylistToQueue,
       }}
     >
       {children}

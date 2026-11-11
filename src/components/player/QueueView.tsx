@@ -1,6 +1,6 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { useMusic } from '../../context/MusicContext';
-import { Trash2, Music2, Play, Volume2, LocateFixed } from 'lucide-react';
+import { Trash2, Music2, Play, Volume2, LocateFixed, Layers, Plus, Edit2, Check, X, ChevronDown } from 'lucide-react';
 
 export const QueueView: React.FC = () => {
   const {
@@ -11,10 +11,25 @@ export const QueueView: React.FC = () => {
     clearQueue,
     themeColors,
     hapticFeedback,
+    enableMultipleQueues,
+    queues,
+    activeQueueId,
+    activeQueueName,
+    switchQueue,
+    createQueue,
+    renameQueue,
+    deleteQueue,
   } = useMusic();
 
   const activeItemRef = useRef<HTMLDivElement | null>(null);
   const listContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // Selector modal state
+  const [isSelectorOpen, setIsSelectorOpen] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
+  const [newQueueName, setNewQueueName] = useState('');
+  const [editingQueueId, setEditingQueueId] = useState<string | null>(null);
+  const [editQueueName, setEditQueueName] = useState('');
 
   // Automatically scroll currently playing song into view
   useEffect(() => {
@@ -31,11 +46,61 @@ export const QueueView: React.FC = () => {
     activeItemRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   };
 
+  const handleCreateNew = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newQueueName.trim()) return;
+    createQueue(newQueueName.trim());
+    setNewQueueName('');
+    setIsCreating(false);
+  };
+
+  const handleSaveRename = (queueId: string) => {
+    if (editQueueName.trim()) {
+      renameQueue(queueId, editQueueName.trim());
+    }
+    setEditingQueueId(null);
+    setEditQueueName('');
+  };
+
   const totalDuration = queue.reduce((acc, s) => acc + (s.duration || 180), 0);
   const totalMins = Math.floor(totalDuration / 60);
 
   return (
     <div className="w-full max-w-md mx-auto flex-1 flex flex-col h-full min-h-0 overflow-hidden px-2 sm:px-4 pt-1 pb-1">
+      {/* Multiple Queues Selector Header Pill */}
+      {enableMultipleQueues && (
+        <div className="mb-2 shrink-0">
+          <button
+            onClick={() => {
+              hapticFeedback();
+              setIsSelectorOpen(true);
+            }}
+            className="w-full p-2.5 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/15 flex items-center justify-between transition shadow-md group cursor-pointer"
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div
+                className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0"
+                style={{ backgroundColor: `${themeColors.accent}25`, color: themeColors.accent }}
+              >
+                <Layers className="w-4 h-4" />
+              </div>
+              <div className="text-left min-w-0">
+                <div className="text-[10px] font-bold uppercase tracking-wider opacity-60">Active Listening Queue</div>
+                <div className="text-xs sm:text-sm font-black text-white truncate group-hover:text-emerald-400 transition">
+                  {activeQueueName}
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0 text-xs font-bold opacity-75">
+              <span className="px-2 py-0.5 rounded-lg bg-white/10 text-[10px] font-mono">
+                {queues.length} {queues.length === 1 ? 'queue' : 'queues'}
+              </span>
+              <ChevronDown className="w-4 h-4" />
+            </div>
+          </button>
+        </div>
+      )}
+
       {/* Queue Header */}
       <div className="flex items-center justify-between pb-2 shrink-0 border-b border-white/10 px-1">
         <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -151,6 +216,155 @@ export const QueueView: React.FC = () => {
           );
         })}
       </div>
+
+      {/* Multiple Queues Manager Modal */}
+      {isSelectorOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fadeIn"
+          onClick={() => setIsSelectorOpen(false)}
+        >
+          <div
+            className="w-full max-w-md bg-neutral-900 border border-white/10 rounded-t-3xl sm:rounded-3xl p-5 space-y-4 max-h-[85vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-2 border-b border-white/10 shrink-0">
+              <div className="flex items-center gap-2">
+                <Layers className="w-5 h-5" style={{ color: themeColors.accent }} />
+                <h3 className="font-black text-base text-white">Switch Listening Queue</h3>
+              </div>
+              <button
+                onClick={() => setIsSelectorOpen(false)}
+                className="p-1.5 rounded-full bg-white/5 hover:bg-white/10 text-white/70"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Create Queue Button or Input */}
+            <div className="shrink-0">
+              {!isCreating ? (
+                <button
+                  onClick={() => setIsCreating(true)}
+                  className="w-full py-2.5 px-3 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/10 font-bold text-xs flex items-center justify-center gap-2 text-white transition active:scale-95"
+                >
+                  <Plus className="w-4 h-4 text-emerald-400" />
+                  <span>Create New Queue (e.g. Workout, Focus)</span>
+                </button>
+              ) : (
+                <form onSubmit={handleCreateNew} className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newQueueName}
+                    onChange={(e) => setNewQueueName(e.target.value)}
+                    placeholder="Queue Name (e.g. Late Night Lofi)"
+                    autoFocus
+                    className="flex-1 bg-black/40 border border-white/20 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-400"
+                  />
+                  <button
+                    type="submit"
+                    className="px-3 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-xs transition"
+                  >
+                    Create
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsCreating(false)}
+                    className="px-2 py-2 rounded-xl bg-white/10 text-white/70 hover:bg-white/20 text-xs"
+                  >
+                    Cancel
+                  </button>
+                </form>
+              )}
+            </div>
+
+            {/* Queue List */}
+            <div className="flex-1 overflow-y-auto space-y-2 no-scrollbar pr-1">
+              {queues.map((q) => {
+                const isActive = q.id === activeQueueId;
+                const isEditing = editingQueueId === q.id;
+                const trackCount = q.songs ? q.songs.length : 0;
+
+                return (
+                  <div
+                    key={q.id}
+                    className={`p-3 rounded-2xl border transition flex items-center justify-between gap-2 ${
+                      isActive
+                        ? 'bg-emerald-500/15 border-emerald-500/40'
+                        : 'bg-white/5 border-white/5 hover:bg-white/10'
+                    }`}
+                  >
+                    {isEditing ? (
+                      <div className="flex-1 flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={editQueueName}
+                          onChange={(e) => setEditQueueName(e.target.value)}
+                          autoFocus
+                          className="flex-1 bg-black/40 border border-white/20 rounded-xl px-2.5 py-1.5 text-xs text-white"
+                        />
+                        <button
+                          onClick={() => handleSaveRename(q.id)}
+                          className="p-1.5 rounded-lg bg-emerald-500 text-black font-bold"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div
+                        onClick={() => {
+                          switchQueue(q.id);
+                          setIsSelectorOpen(false);
+                        }}
+                        className="flex-1 flex items-center gap-3 cursor-pointer min-w-0"
+                      >
+                        <div
+                          className={`w-3 h-3 rounded-full shrink-0 ${
+                            isActive ? 'bg-emerald-400 animate-pulse shadow-md' : 'bg-white/20'
+                          }`}
+                        />
+                        <div className="min-w-0">
+                          <div className={`text-xs sm:text-sm font-bold truncate ${isActive ? 'text-emerald-400' : 'text-white'}`}>
+                            {q.name}
+                          </div>
+                          <div className="text-[10px] opacity-50 font-mono">
+                            {trackCount} {trackCount === 1 ? 'track' : 'tracks'}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {!isEditing && (
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          onClick={() => {
+                            setEditingQueueId(q.id);
+                            setEditQueueName(q.name);
+                          }}
+                          className="p-1.5 rounded-lg opacity-50 hover:opacity-100 hover:bg-white/10 text-white transition"
+                          title="Rename queue"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+
+                        {q.id !== 'queue-main' && (
+                          <button
+                            onClick={() => deleteQueue(q.id)}
+                            className="p-1.5 rounded-lg opacity-40 hover:opacity-100 hover:bg-red-500/20 text-red-400 transition"
+                            title="Delete queue"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+

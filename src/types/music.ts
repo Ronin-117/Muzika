@@ -50,6 +50,15 @@ export interface Playlist {
   createdAt: number;
 }
 
+export interface NamedQueue {
+  id: string;
+  name: string;
+  songs: Song[];
+  queueIndex: number;
+  currentTime?: number;
+  createdAt: number;
+}
+
 export interface SyncedLyricLine {
   time: number; // seconds
   text: string;

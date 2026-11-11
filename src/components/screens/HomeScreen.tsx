@@ -5,6 +5,7 @@ import { Play, Sparkles, Flame, Smartphone, Heart, ChevronRight, CheckCircle2, L
 import { usePWAInstall } from '../../hooks/usePWAInstall';
 import { Song } from '../../types/music';
 import { OnlineMusicService } from '../../services/onlineMusicService';
+import { SwipeableSongRow } from '../common/SwipeableSongRow';
 
 export const HomeScreen: React.FC = () => {
   const {
@@ -120,27 +121,28 @@ export const HomeScreen: React.FC = () => {
           {INITIAL_SONGS.slice(0, 4).map((song) => {
             const isThisPlaying = currentSong?.id === song.id && isPlaying;
             return (
-              <div
-                key={song.id}
-                onClick={() => playSong(song, INITIAL_SONGS)}
-                className="p-2.5 rounded-2xl bg-white/5 hover:bg-white/10 transition border border-white/5 cursor-pointer flex items-center gap-2.5 group relative overflow-hidden"
-              >
-                <div className="relative w-12 h-12 rounded-xl overflow-hidden shrink-0 shadow-md">
-                  <img src={song.thumbnailUrl} alt={song.title} className="w-full h-full object-cover" />
-                  <div className="absolute inset-0 bg-black/30 group-hover:bg-black/50 transition flex items-center justify-center">
-                    <Play
-                      className={`w-5 h-5 fill-white text-white transition transform ${
-                        isThisPlaying ? 'scale-110 opacity-100' : 'opacity-0 group-hover:opacity-100'
-                      }`}
-                    />
+              <SwipeableSongRow key={song.id} song={song}>
+                <div
+                  onClick={() => playSong(song, INITIAL_SONGS)}
+                  className="p-2.5 rounded-2xl bg-white/5 hover:bg-white/10 transition border border-white/5 cursor-pointer flex items-center gap-2.5 group relative overflow-hidden"
+                >
+                  <div className="relative w-12 h-12 rounded-xl overflow-hidden shrink-0 shadow-md">
+                    <img src={song.thumbnailUrl} alt={song.title} className="w-full h-full object-cover" />
+                    <div className="absolute inset-0 bg-black/30 group-hover:bg-black/50 transition flex items-center justify-center">
+                      <Play
+                        className={`w-5 h-5 fill-white text-white transition transform ${
+                          isThisPlaying ? 'scale-110 opacity-100' : 'opacity-0 group-hover:opacity-100'
+                        }`}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-bold truncate leading-tight">{song.title}</div>
+                    <div className="text-[11px] opacity-60 truncate mt-0.5">{song.artist}</div>
                   </div>
                 </div>
-
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs font-bold truncate leading-tight">{song.title}</div>
-                  <div className="text-[11px] opacity-60 truncate mt-0.5">{song.artist}</div>
-                </div>
-              </div>
+              </SwipeableSongRow>
             );
           })}
         </div>
@@ -205,59 +207,60 @@ export const HomeScreen: React.FC = () => {
             const isThisPlaying = currentSong?.id === song.id && isPlaying;
             const liked = isLiked(song.id);
             return (
-              <div
-                key={song.id}
-                onClick={() => playSong(song, trendingTracks)}
-                className="flex items-center justify-between p-2.5 rounded-2xl bg-white/5 hover:bg-white/10 transition border border-white/5 cursor-pointer group active:scale-[0.99]"
-              >
-                <div className="flex items-center gap-3 min-w-0 flex-1">
-                  <span className="text-xs font-mono font-bold w-4 text-center opacity-40">
-                    {idx + 1}
-                  </span>
-                  <div className="relative w-11 h-11 rounded-xl overflow-hidden shrink-0 shadow-md">
-                    <img src={song.thumbnailUrl} alt={song.title} className="w-full h-full object-cover" />
-                    <div className="absolute inset-0 bg-black/30 group-hover:bg-black/50 flex items-center justify-center transition">
-                      <Play
-                        className={`w-5 h-5 fill-white text-white ${
-                          isThisPlaying ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+              <SwipeableSongRow key={song.id} song={song}>
+                <div
+                  onClick={() => playSong(song, trendingTracks)}
+                  className="flex items-center justify-between p-2.5 rounded-2xl bg-white/5 hover:bg-white/10 transition border border-white/5 cursor-pointer group active:scale-[0.99]"
+                >
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <span className="text-xs font-mono font-bold w-4 text-center opacity-40">
+                      {idx + 1}
+                    </span>
+                    <div className="relative w-11 h-11 rounded-xl overflow-hidden shrink-0 shadow-md">
+                      <img src={song.thumbnailUrl} alt={song.title} className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-black/30 group-hover:bg-black/50 flex items-center justify-center transition">
+                        <Play
+                          className={`w-5 h-5 fill-white text-white ${
+                            isThisPlaying ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                          }`}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <div
+                          className={`text-sm font-semibold truncate ${
+                            currentSong?.id === song.id ? 'text-orange-400' : ''
+                          }`}
+                          style={{ color: currentSong?.id === song.id ? themeColors.accent : undefined }}
+                        >
+                          {song.title}
+                        </div>
+                        {isSongCached(song.id) && (
+                          <span className="shrink-0 flex items-center gap-0.5 text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded">
+                            <CheckCircle2 className="w-2.5 h-2.5" /> Offline
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs opacity-60 truncate mt-0.5">{song.artist}</div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => toggleLike(song)}
+                      className="p-2 rounded-full hover:bg-white/10 transition"
+                    >
+                      <Heart
+                        className={`w-4 h-4 transition ${
+                          liked ? 'fill-rose-500 text-rose-500' : 'text-white/40'
                         }`}
                       />
-                    </div>
-                  </div>
-
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5">
-                      <div
-                        className={`text-sm font-semibold truncate ${
-                          currentSong?.id === song.id ? 'text-orange-400' : ''
-                        }`}
-                        style={{ color: currentSong?.id === song.id ? themeColors.accent : undefined }}
-                      >
-                        {song.title}
-                      </div>
-                      {isSongCached(song.id) && (
-                        <span className="shrink-0 flex items-center gap-0.5 text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded">
-                          <CheckCircle2 className="w-2.5 h-2.5" /> Offline
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-xs opacity-60 truncate mt-0.5">{song.artist}</div>
+                    </button>
                   </div>
                 </div>
-
-                <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
-                  <button
-                    onClick={() => toggleLike(song)}
-                    className="p-2 rounded-full hover:bg-white/10 transition"
-                  >
-                    <Heart
-                      className={`w-4 h-4 transition ${
-                        liked ? 'fill-rose-500 text-rose-500' : 'text-white/40'
-                      }`}
-                    />
-                  </button>
-                </div>
-              </div>
+              </SwipeableSongRow>
             );
           })}
         </div>

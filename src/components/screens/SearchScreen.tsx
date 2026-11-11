@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { Song, Artist, Album } from '../../types/music';
 import { OnlineMusicService } from '../../services/onlineMusicService';
+import { SwipeableSongRow } from '../common/SwipeableSongRow';
 
 export const SearchScreen: React.FC = () => {
   const {
@@ -489,96 +490,97 @@ export const SearchScreen: React.FC = () => {
                   const isCaching = cachingSongId === song.id;
 
                   return (
-                    <div
-                      key={song.id}
-                      onClick={() => {
-                        hapticFeedback();
-                        playSong(song, combinedSongs);
-                      }}
-                      className="flex items-center justify-between p-2.5 rounded-2xl bg-white/5 hover:bg-white/10 transition border border-white/5 cursor-pointer group active:scale-[0.99]"
-                    >
-                      <div className="flex items-center gap-3 min-w-0 flex-1">
-                        <div className="relative w-12 h-12 rounded-xl overflow-hidden shrink-0 shadow-md">
-                          <img
-                            src={song.thumbnailUrl}
-                            alt={song.title}
-                            className="w-full h-full object-cover group-hover:scale-105 transition"
-                          />
-                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition text-white">
-                            <Play className="w-5 h-5 fill-white" />
-                          </div>
-                        </div>
-
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5">
-                            <div className="text-sm font-semibold truncate leading-tight text-white">
-                              {song.title}
+                    <SwipeableSongRow key={song.id} song={song}>
+                      <div
+                        onClick={() => {
+                          hapticFeedback();
+                          playSong(song, combinedSongs);
+                        }}
+                        className="flex items-center justify-between p-2.5 rounded-2xl bg-white/5 hover:bg-white/10 transition border border-white/5 cursor-pointer group active:scale-[0.99]"
+                      >
+                        <div className="flex items-center gap-3 min-w-0 flex-1">
+                          <div className="relative w-12 h-12 rounded-xl overflow-hidden shrink-0 shadow-md">
+                            <img
+                              src={song.thumbnailUrl}
+                              alt={song.title}
+                              className="w-full h-full object-cover group-hover:scale-105 transition"
+                            />
+                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition text-white">
+                              <Play className="w-5 h-5 fill-white" />
                             </div>
-                            {cached && (
-                              <span className="shrink-0 flex items-center gap-0.5 text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded">
-                                <CheckCircle2 className="w-2.5 h-2.5" /> Offline
-                              </span>
-                            )}
                           </div>
-                          <div className="text-xs opacity-60 truncate mt-0.5">
-                            {song.artist} {song.album ? `• ${song.album}` : ''}
+
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                              <div className="text-sm font-semibold truncate leading-tight text-white">
+                                {song.title}
+                              </div>
+                              {cached && (
+                                <span className="shrink-0 flex items-center gap-0.5 text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded">
+                                  <CheckCircle2 className="w-2.5 h-2.5" /> Offline
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-xs opacity-60 truncate mt-0.5">
+                              {song.artist} {song.album ? `• ${song.album}` : ''}
+                            </div>
                           </div>
                         </div>
+
+                        {/* Right Action Icons */}
+                        <div className="flex items-center gap-1 shrink-0 ml-2">
+                          {/* Offline Cache Button */}
+                          <button
+                            onClick={(e) => handleCacheTrack(e, song)}
+                            title={cached ? 'Cached Offline' : 'Save for offline'}
+                            className={`p-1.5 rounded-full transition ${
+                              cached
+                                ? 'text-emerald-400 bg-emerald-500/10'
+                                : 'text-white/40 hover:text-white hover:bg-white/10'
+                            }`}
+                          >
+                            {isCaching ? (
+                              <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
+                            ) : (
+                              <Download className="w-4 h-4" />
+                            )}
+                          </button>
+
+                          {/* Like Button */}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              hapticFeedback();
+                              toggleLike(song);
+                            }}
+                            className={`p-1.5 rounded-full transition ${
+                              liked
+                                ? 'text-rose-500 fill-rose-500'
+                                : 'text-white/40 hover:text-white hover:bg-white/10'
+                            }`}
+                          >
+                            <Heart className={`w-4 h-4 ${liked ? 'fill-rose-500' : ''}`} />
+                          </button>
+
+                          {/* Add to Queue */}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              hapticFeedback();
+                              addToQueue(song);
+                            }}
+                            title="Add to queue"
+                            className="p-1.5 rounded-full text-white/40 hover:text-white hover:bg-white/10 transition"
+                          >
+                            <Plus className="w-4 h-4" />
+                          </button>
+
+                          <span className="text-xs opacity-40 font-mono ml-1 min-w-[32px] text-right">
+                            {Math.floor(song.duration / 60)}:{(song.duration % 60).toString().padStart(2, '0')}
+                          </span>
+                        </div>
                       </div>
-
-                      {/* Right Action Icons */}
-                      <div className="flex items-center gap-1 shrink-0 ml-2">
-                        {/* Offline Cache Button */}
-                        <button
-                          onClick={(e) => handleCacheTrack(e, song)}
-                          title={cached ? 'Cached Offline' : 'Save for offline'}
-                          className={`p-1.5 rounded-full transition ${
-                            cached
-                              ? 'text-emerald-400 bg-emerald-500/10'
-                              : 'text-white/40 hover:text-white hover:bg-white/10'
-                          }`}
-                        >
-                          {isCaching ? (
-                            <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
-                          ) : (
-                            <Download className="w-4 h-4" />
-                          )}
-                        </button>
-
-                        {/* Like Button */}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            hapticFeedback();
-                            toggleLike(song);
-                          }}
-                          className={`p-1.5 rounded-full transition ${
-                            liked
-                              ? 'text-rose-500 fill-rose-500'
-                              : 'text-white/40 hover:text-white hover:bg-white/10'
-                          }`}
-                        >
-                          <Heart className={`w-4 h-4 ${liked ? 'fill-rose-500' : ''}`} />
-                        </button>
-
-                        {/* Add to Queue */}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            hapticFeedback();
-                            addToQueue(song);
-                          }}
-                          title="Add to queue"
-                          className="p-1.5 rounded-full text-white/40 hover:text-white hover:bg-white/10 transition"
-                        >
-                          <Plus className="w-4 h-4" />
-                        </button>
-
-                        <span className="text-xs opacity-40 font-mono ml-1 min-w-[32px] text-right">
-                          {Math.floor(song.duration / 60)}:{(song.duration % 60).toString().padStart(2, '0')}
-                        </span>
-                      </div>
-                    </div>
+                    </SwipeableSongRow>
                   );
                 })}
               </div>

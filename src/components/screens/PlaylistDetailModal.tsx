@@ -9,7 +9,12 @@ import {
   Music,
   CheckCircle2,
   DownloadCloud,
+  ListPlus,
+  ListVideo,
+  ListOrdered,
+  Layers,
 } from 'lucide-react';
+import { SwipeableSongRow } from '../common/SwipeableSongRow';
 
 export const PlaylistDetailModal: React.FC = () => {
   const {
@@ -22,9 +27,11 @@ export const PlaylistDetailModal: React.FC = () => {
     isSongCached,
     cacheSong,
     removeCachedSong,
+    addPlaylistToQueue,
   } = useMusic();
 
   const [onlyOffline, setOnlyOffline] = useState(false);
+  const [showQueueOptions, setShowQueueOptions] = useState(false);
 
   if (!selectedPlaylist) return null;
 
@@ -120,6 +127,15 @@ export const PlaylistDetailModal: React.FC = () => {
             >
               <Shuffle className="w-4 h-4" /> Shuffle
             </button>
+
+            <button
+              onClick={() => setShowQueueOptions(true)}
+              disabled={selectedPlaylist.songs.length === 0}
+              className="px-4 py-2.5 rounded-full bg-white/10 hover:bg-white/15 text-white font-bold text-xs flex items-center gap-2 transition active:scale-95 border border-white/10 disabled:opacity-40"
+            >
+              <ListPlus className="w-4 h-4 text-emerald-400" /> + Add to Queue
+            </button>
+
             {cachedSongsInPlaylist.length > 0 && (
               <button
                 onClick={() => handlePlayAll(false, true)}
@@ -129,6 +145,68 @@ export const PlaylistDetailModal: React.FC = () => {
               </button>
             )}
           </div>
+
+          {/* Add to Queue Options Modal */}
+          {showQueueOptions && (
+            <div
+              className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4"
+              onClick={() => setShowQueueOptions(false)}
+            >
+              <div
+                className="w-full max-w-sm bg-neutral-900 border border-white/10 rounded-t-3xl sm:rounded-3xl p-5 space-y-3"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="font-black text-sm text-white flex items-center gap-2 pb-2 border-b border-white/10">
+                  <ListPlus className="w-4 h-4 text-emerald-400" />
+                  <span>Add "{selectedPlaylist.title}" to Queue</span>
+                </div>
+
+                <div className="space-y-2 pt-1">
+                  <button
+                    onClick={() => {
+                      addPlaylistToQueue(selectedPlaylist, 'append');
+                      setShowQueueOptions(false);
+                    }}
+                    className="w-full p-3 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/5 flex items-center gap-3 text-left transition active:scale-95"
+                  >
+                    <ListOrdered className="w-5 h-5 text-emerald-400" />
+                    <div>
+                      <div className="text-xs font-bold text-white">Append to End of Queue</div>
+                      <div className="text-[10px] opacity-50">Adds {selectedPlaylist.songs.length} tracks to the bottom</div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      addPlaylistToQueue(selectedPlaylist, 'next');
+                      setShowQueueOptions(false);
+                    }}
+                    className="w-full p-3 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/5 flex items-center gap-3 text-left transition active:scale-95"
+                  >
+                    <ListVideo className="w-5 h-5 text-cyan-400" />
+                    <div>
+                      <div className="text-xs font-bold text-white">Play Next</div>
+                      <div className="text-[10px] opacity-50">Inserts tracks right after current playing song</div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      addPlaylistToQueue(selectedPlaylist, 'replace');
+                      setShowQueueOptions(false);
+                    }}
+                    className="w-full p-3 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/5 flex items-center gap-3 text-left transition active:scale-95"
+                  >
+                    <Play className="w-5 h-5 text-purple-400" />
+                    <div>
+                      <div className="text-xs font-bold text-white">Replace Current Queue</div>
+                      <div className="text-[10px] opacity-50 font-medium">Replaces current queue and starts playing</div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Offline filter toggle chips */}
           <div className="flex items-center gap-2 pt-1">
@@ -164,58 +242,59 @@ export const PlaylistDetailModal: React.FC = () => {
             displayedSongs.map((song, idx) => {
               const cached = isSongCached(song.id);
               return (
-                <div
-                  key={`${song.id}-${idx}`}
-                  onClick={() => {
-                    hapticFeedback();
-                    playSong(song, displayedSongs);
-                  }}
-                  className="flex items-center justify-between p-2.5 rounded-2xl bg-white/5 hover:bg-white/10 transition cursor-pointer group"
-                >
-                  <div className="flex items-center gap-3 min-w-0 flex-1">
-                    <span className="text-xs font-mono opacity-40 w-4 text-center">{idx + 1}</span>
-                    <div className="relative w-10 h-10 rounded-lg overflow-hidden shrink-0">
-                      <img src={song.thumbnailUrl} alt={song.title} className="w-full h-full object-cover" />
-                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
-                        <Play className="w-4 h-4 fill-white" />
+                <SwipeableSongRow key={`${song.id}-${idx}`} song={song}>
+                  <div
+                    onClick={() => {
+                      hapticFeedback();
+                      playSong(song, displayedSongs);
+                    }}
+                    className="flex items-center justify-between p-2.5 rounded-2xl bg-white/5 hover:bg-white/10 transition cursor-pointer group"
+                  >
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <span className="text-xs font-mono opacity-40 w-4 text-center">{idx + 1}</span>
+                      <div className="relative w-10 h-10 rounded-lg overflow-hidden shrink-0">
+                        <img src={song.thumbnailUrl} alt={song.title} className="w-full h-full object-cover" />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
+                          <Play className="w-4 h-4 fill-white" />
+                        </div>
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <div className="text-sm font-semibold truncate leading-tight">{song.title}</div>
+                          {cached && (
+                            <span className="shrink-0 flex items-center gap-0.5 text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded">
+                              <CheckCircle2 className="w-2.5 h-2.5" /> Offline
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs opacity-60 truncate">{song.artist}</div>
                       </div>
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5">
-                        <div className="text-sm font-semibold truncate leading-tight">{song.title}</div>
-                        {cached && (
-                          <span className="shrink-0 flex items-center gap-0.5 text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded">
-                            <CheckCircle2 className="w-2.5 h-2.5" /> Offline
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-xs opacity-60 truncate">{song.artist}</div>
+
+                    <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                      {/* Toggle Cache Button */}
+                      <button
+                        onClick={() => handleToggleCache(song)}
+                        className={`p-1.5 rounded-lg transition ${
+                          cached
+                            ? 'text-emerald-400 bg-emerald-500/10'
+                            : 'opacity-40 hover:opacity-100 hover:text-white'
+                        }`}
+                        title={cached ? 'Available Offline (Click to remove)' : 'Download for offline play'}
+                      >
+                        {cached ? <CheckCircle2 className="w-4 h-4" /> : <DownloadCloud className="w-4 h-4" />}
+                      </button>
+
+                      <button
+                        onClick={() => removeFromPlaylist(selectedPlaylist.id, song.id)}
+                        className="p-1.5 opacity-30 hover:opacity-100 hover:text-red-400 transition"
+                        title="Remove from playlist"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
-
-                  <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-                    {/* Toggle Cache Button */}
-                    <button
-                      onClick={() => handleToggleCache(song)}
-                      className={`p-1.5 rounded-lg transition ${
-                        cached
-                          ? 'text-emerald-400 bg-emerald-500/10'
-                          : 'opacity-40 hover:opacity-100 hover:text-white'
-                      }`}
-                      title={cached ? 'Available Offline (Click to remove)' : 'Download for offline play'}
-                    >
-                      {cached ? <CheckCircle2 className="w-4 h-4" /> : <DownloadCloud className="w-4 h-4" />}
-                    </button>
-
-                    <button
-                      onClick={() => removeFromPlaylist(selectedPlaylist.id, song.id)}
-                      className="p-1.5 opacity-30 hover:opacity-100 hover:text-red-400 transition"
-                      title="Remove from playlist"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
+                </SwipeableSongRow>
               );
             })
           )}

@@ -23,6 +23,7 @@ import {
   FileDown,
 } from 'lucide-react';
 import { Song, Artist, Album } from '../../types/music';
+import { SwipeableSongRow } from '../common/SwipeableSongRow';
 
 export const LibraryScreen: React.FC = () => {
   const {
@@ -55,6 +56,7 @@ export const LibraryScreen: React.FC = () => {
     savedAlbums,
     toggleSaveAlbum,
     isAlbumSaved,
+    addPlaylistToQueue,
   } = useMusic();
 
   const [activeSubTab, setActiveSubTab] = useState<
@@ -271,7 +273,18 @@ export const LibraryScreen: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    onClick={() => {
+                      hapticFeedback();
+                      addPlaylistToQueue(pl, 'append');
+                    }}
+                    className="p-2 opacity-50 hover:opacity-100 hover:text-emerald-400 hover:bg-white/10 transition rounded-xl"
+                    title="Add playlist to queue"
+                  >
+                    <ListPlus className="w-4 h-4 text-emerald-400" />
+                  </button>
+
                   <button
                     onClick={() => {
                       if (confirm(`Delete playlist "${pl.title}"?`)) {
@@ -279,6 +292,7 @@ export const LibraryScreen: React.FC = () => {
                       }
                     }}
                     className="p-2 opacity-30 hover:opacity-100 hover:text-red-400 transition"
+                    title="Delete playlist"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -327,48 +341,49 @@ export const LibraryScreen: React.FC = () => {
                 const song = record.song;
                 const sizeMb = (record.sizeBytes / (1024 * 1024)).toFixed(1);
                 return (
-                  <div
-                    key={song.id}
-                    onClick={() => playSong(song, cachedTracks.map((c) => c.song))}
-                    className="flex items-center justify-between p-2.5 rounded-2xl bg-white/5 hover:bg-white/10 transition border border-emerald-500/10 cursor-pointer group"
-                  >
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <div className="relative w-11 h-11 rounded-xl overflow-hidden shrink-0 shadow-md">
-                        <img src={song.thumbnailUrl} alt={song.title} className="w-full h-full object-cover" />
-                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
-                          <Play className="w-4 h-4 fill-white text-white" />
+                  <SwipeableSongRow key={song.id} song={song}>
+                    <div
+                      onClick={() => playSong(song, cachedTracks.map((c) => c.song))}
+                      className="flex items-center justify-between p-2.5 rounded-2xl bg-white/5 hover:bg-white/10 transition border border-emerald-500/10 cursor-pointer group"
+                    >
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
+                        <div className="relative w-11 h-11 rounded-xl overflow-hidden shrink-0 shadow-md">
+                          <img src={song.thumbnailUrl} alt={song.title} className="w-full h-full object-cover" />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
+                            <Play className="w-4 h-4 fill-white text-white" />
+                          </div>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <div className="text-sm font-semibold truncate leading-tight">{song.title}</div>
+                            <span className="shrink-0 flex items-center gap-0.5 text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">
+                              <CheckCircle2 className="w-2.5 h-2.5" /> Offline
+                            </span>
+                          </div>
+                          <div className="text-xs opacity-60 truncate mt-0.5">
+                            {song.artist} • {sizeMb} MB
+                          </div>
                         </div>
                       </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5">
-                          <div className="text-sm font-semibold truncate leading-tight">{song.title}</div>
-                          <span className="shrink-0 flex items-center gap-0.5 text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">
-                            <CheckCircle2 className="w-2.5 h-2.5" /> Offline
-                          </span>
-                        </div>
-                        <div className="text-xs opacity-60 truncate mt-0.5">
-                          {song.artist} • {sizeMb} MB
-                        </div>
-                      </div>
-                    </div>
 
-                    <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        onClick={() => handleExportSingleTrack(record)}
-                        className="p-2 opacity-50 hover:opacity-100 hover:text-emerald-400 transition"
-                        title="Download MP3 file to device / SD card"
-                      >
-                        <FileDown className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => removeCachedSong(song.id)}
-                        className="p-2 opacity-40 hover:opacity-100 hover:text-red-400 transition"
-                        title="Delete from offline storage"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          onClick={() => handleExportSingleTrack(record)}
+                          className="p-2 opacity-50 hover:opacity-100 hover:text-emerald-400 transition"
+                          title="Download MP3 file to device / SD card"
+                        >
+                          <FileDown className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => removeCachedSong(song.id)}
+                          className="p-2 opacity-40 hover:opacity-100 hover:text-red-400 transition"
+                          title="Delete from offline storage"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
-                  </div>
+                  </SwipeableSongRow>
                 );
               })}
             </div>
@@ -543,22 +558,23 @@ export const LibraryScreen: React.FC = () => {
 
           <div className="space-y-1.5">
             {history.map((song, i) => (
-              <div
-                key={`${song.id}-${i}`}
-                onClick={() => playSong(song, history)}
-                className="flex items-center justify-between p-2.5 rounded-2xl bg-white/5 hover:bg-white/10 transition cursor-pointer"
-              >
-                <div className="flex items-center gap-3 min-w-0 flex-1">
-                  <div className="w-10 h-10 rounded-lg overflow-hidden shrink-0">
-                    <img src={song.thumbnailUrl} alt={song.title} className="w-full h-full object-cover" />
+              <SwipeableSongRow key={`${song.id}-${i}`} song={song}>
+                <div
+                  onClick={() => playSong(song, history)}
+                  className="flex items-center justify-between p-2.5 rounded-2xl bg-white/5 hover:bg-white/10 transition cursor-pointer"
+                >
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <div className="w-10 h-10 rounded-lg overflow-hidden shrink-0">
+                      <img src={song.thumbnailUrl} alt={song.title} className="w-full h-full object-cover" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-semibold truncate">{song.title}</div>
+                      <div className="text-xs opacity-60 truncate">{song.artist}</div>
+                    </div>
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold truncate">{song.title}</div>
-                    <div className="text-xs opacity-60 truncate">{song.artist}</div>
-                  </div>
+                  <Play className="w-4 h-4 opacity-40 shrink-0" />
                 </div>
-                <Play className="w-4 h-4 opacity-40 shrink-0" />
-              </div>
+              </SwipeableSongRow>
             ))}
           </div>
         </section>

@@ -16,6 +16,9 @@ const STORAGE_KEYS = {
   SAVED_ALBUMS: 'muzika_saved_albums',
   RIPLAY_IMPORT_STATS: 'muzika_riplay_import_summary',
   LAST_PLAYBACK_STATE: 'muzika_last_playback_state',
+  ENABLE_MULTIPLE_QUEUES: 'muzika_enable_multiple_queues',
+  NAMED_QUEUES: 'muzika_named_queues',
+  ACTIVE_QUEUE_ID: 'muzika_active_queue_id',
 };
 
 export const DEFAULT_EQUALIZER: EqualizerSettings = {
@@ -314,6 +317,48 @@ export class StorageService {
     } catch (e) {
       // quota or private mode
     }
+  }
+
+  static getEnableMultipleQueues(): boolean {
+    try {
+      return localStorage.getItem(STORAGE_KEYS.ENABLE_MULTIPLE_QUEUES) === 'true';
+    } catch {
+      return false;
+    }
+  }
+
+  static saveEnableMultipleQueues(enabled: boolean): void {
+    try {
+      localStorage.setItem(STORAGE_KEYS.ENABLE_MULTIPLE_QUEUES, String(enabled));
+    } catch {}
+  }
+
+  static getNamedQueues(): any[] {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.NAMED_QUEUES);
+      if (data) return JSON.parse(data);
+    } catch {}
+    return [];
+  }
+
+  static saveNamedQueues(queues: any[]): void {
+    try {
+      localStorage.setItem(STORAGE_KEYS.NAMED_QUEUES, JSON.stringify(queues));
+    } catch {}
+  }
+
+  static getActiveQueueId(): string {
+    try {
+      return localStorage.getItem(STORAGE_KEYS.ACTIVE_QUEUE_ID) || 'queue-main';
+    } catch {
+      return 'queue-main';
+    }
+  }
+
+  static saveActiveQueueId(id: string): void {
+    try {
+      localStorage.setItem(STORAGE_KEYS.ACTIVE_QUEUE_ID, id);
+    } catch {}
   }
 
   // RiPlay Backup & Restore mechanism (Export & Import JSON)

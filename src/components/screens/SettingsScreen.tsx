@@ -21,6 +21,7 @@ import {
   ShieldCheck,
   HardDrive,
   FileDown,
+  ListMusic,
 } from 'lucide-react';
 import { StorageService } from '../../services/storageService';
 import { usePWAInstall } from '../../hooks/usePWAInstall';
@@ -43,6 +44,8 @@ export const SettingsScreen: React.FC = () => {
     updateCacheConfig,
     storageEstimate,
     clearOfflineCache,
+    enableMultipleQueues,
+    setEnableMultipleQueues,
   } = useMusic();
   const { isInstalled } = usePWAInstall();
 
@@ -239,6 +242,39 @@ export const SettingsScreen: React.FC = () => {
               High Fidelity
             </span>
           </div>
+        </div>
+      </section>
+
+      {/* Multiple Queues Feature */}
+      <section className="space-y-3">
+        <h2 className="text-xs font-bold uppercase tracking-wider opacity-60">Advanced Queue Management</h2>
+        <div className="p-4 rounded-2xl bg-white/5 border border-white/5 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <ListMusic className="w-5 h-5" style={{ color: themeColors.accent }} />
+              <div>
+                <div className="text-sm font-bold text-white">Multiple Listening Queues</div>
+                <div className="text-xs opacity-50">Maintain separate queues (e.g. Workout, Focus)</div>
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                setEnableMultipleQueues(!enableMultipleQueues);
+              }}
+              className={`w-11 h-6 rounded-full transition-colors relative flex items-center p-0.5 cursor-pointer ${
+                enableMultipleQueues ? 'bg-emerald-500' : 'bg-white/10'
+              }`}
+            >
+              <div
+                className={`w-5 h-5 rounded-full bg-white transition-transform ${
+                  enableMultipleQueues ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+          <p className="text-[11px] opacity-60 leading-relaxed">
+            When enabled, an interactive queue manager pill appears inside the player queue view, allowing you to create custom named queues, switch active listening states seamlessly, and rename or delete queues.
+          </p>
         </div>
       </section>
 
