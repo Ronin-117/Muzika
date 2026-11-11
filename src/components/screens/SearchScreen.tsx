@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useMusic } from '../../context/MusicContext';
-import { INITIAL_SONGS, INITIAL_ARTISTS, INITIAL_PLAYLISTS, INITIAL_ALBUMS, MOOD_CATEGORIES } from '../../data/mockCatalog';
+import { MOOD_CATEGORIES } from '../../data/mockCatalog';
 import {
   Search,
   X,
@@ -170,7 +170,6 @@ export const SearchScreen: React.FC = () => {
     if (!query.trim()) return [];
     const q = query.toLowerCase();
     const map = new Map<string, Song>();
-    INITIAL_SONGS.forEach((s) => map.set(s.id, s));
     likedSongs.forEach((s) => map.set(s.id, s));
     playlists.forEach((p) => p.songs.forEach((s) => map.set(s.id, s)));
 
@@ -187,7 +186,6 @@ export const SearchScreen: React.FC = () => {
     savedArtists.forEach((a) => map.set(a.id, a));
     importedArtists.forEach((a) => map.set(a.id, a));
     onlineArtists.forEach((a) => map.set(a.id, a));
-    INITIAL_ARTISTS.forEach((a) => map.set(a.id, a));
     return Array.from(map.values());
   }, [importedArtists, savedArtists, onlineArtists]);
 
@@ -202,7 +200,6 @@ export const SearchScreen: React.FC = () => {
     savedAlbums.forEach((a) => map.set(a.id, a));
     importedAlbums.forEach((a) => map.set(a.id, a));
     onlineAlbums.forEach((a) => map.set(a.id, a));
-    INITIAL_ALBUMS.forEach((a) => map.set(a.id, a));
     return Array.from(map.values());
   }, [importedAlbums, savedAlbums, onlineAlbums]);
 

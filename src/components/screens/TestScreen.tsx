@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useMusic } from '../../context/MusicContext';
-import { INITIAL_SONGS } from '../../data/mockCatalog';
+import { Song } from '../../types/music';
 import {
   FlaskConical,
   Play,
@@ -29,6 +29,31 @@ export interface TestLogEntry {
 
 const STORAGE_KEY = 'muzika_test_logs';
 
+const SAMPLE_TEST_SONGS: Song[] = [
+  {
+    id: 'yt-4NRXx6U8ABQ',
+    title: 'Starboy',
+    artist: 'The Weeknd ft. Daft Punk',
+    duration: 230,
+    thumbnailUrl: 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=600&auto=format&fit=crop&q=80',
+    source: 'youtube',
+    youtubeId: '34Na4j8AVgA',
+    year: 2016,
+    genre: 'R&B / Pop',
+  },
+  {
+    id: 'yt-kXYiU_JCYtU',
+    title: 'Numb',
+    artist: 'Linkin Park',
+    duration: 187,
+    thumbnailUrl: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=600&auto=format&fit=crop&q=80',
+    source: 'youtube',
+    youtubeId: 'kXYiU_JCYtU',
+    year: 2003,
+    genre: 'Rock',
+  },
+];
+
 export const TestScreen: React.FC = () => {
   const {
     currentSong,
@@ -39,7 +64,14 @@ export const TestScreen: React.FC = () => {
     togglePlay,
     themeColors,
     hapticFeedback,
+    likedSongs,
+    history,
   } = useMusic();
+
+  const testSongsList = useMemo(() => {
+    const list = [...likedSongs, ...history];
+    return list.length > 0 ? list : SAMPLE_TEST_SONGS;
+  }, [likedSongs, history]);
 
   const [logs, setLogs] = useState<TestLogEntry[]>(() => {
     if (typeof window !== 'undefined') {
@@ -62,7 +94,7 @@ export const TestScreen: React.FC = () => {
   });
 
   const [copied, setCopied] = useState(false);
-  const [selectedTestSongId, setSelectedTestSongId] = useState<string>(INITIAL_SONGS[0].id);
+  const [selectedTestSongId, setSelectedTestSongId] = useState<string>(testSongsList[0].id);
   const [isSimulating, setIsSimulating] = useState(false);
   const [hiddenStartTime, setHiddenStartTime] = useState<number | null>(null);
 
@@ -144,7 +176,7 @@ export const TestScreen: React.FC = () => {
 
   const handleStartTestTrack = (songId: string) => {
     hapticFeedback();
-    const song = INITIAL_SONGS.find((s) => s.id === songId) || INITIAL_SONGS[0];
+    const song = testSongsList.find((s) => s.id === songId) || testSongsList[0];
     setSelectedTestSongId(song.id);
     playSong(song);
     addLog(
@@ -222,7 +254,7 @@ export const TestScreen: React.FC = () => {
     localStorage.removeItem(STORAGE_KEY);
   };
 
-  const selectedTestSong = INITIAL_SONGS.find((s) => s.id === selectedTestSongId) || INITIAL_SONGS[0];
+  const selectedTestSong = testSongsList.find((s) => s.id === selectedTestSongId) || testSongsList[0];
 
   return (
     <div className="min-h-screen pb-32 pt-16 px-4 max-w-md mx-auto space-y-5 animate-in fade-in duration-300">
@@ -301,7 +333,7 @@ export const TestScreen: React.FC = () => {
         </div>
 
         <div className="space-y-2">
-          {INITIAL_SONGS.slice(0, 3).map((song) => {
+          {testSongsList.slice(0, 3).map((song) => {
             const isSelected = selectedTestSongId === song.id;
             const isCurrentPlaying = currentSong?.id === song.id && isPlaying;
             return (

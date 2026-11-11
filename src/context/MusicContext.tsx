@@ -12,7 +12,6 @@ import {
   LyricsData,
   NamedQueue,
 } from '../types/music';
-import { INITIAL_SONGS, INITIAL_PLAYLISTS } from '../data/mockCatalog';
 import { StorageService } from '../services/storageService';
 import { fetchLyricsFromLrcLib, parseLrcString } from '../services/lyricsService';
 import { YouTubeController } from '../services/youtubeService';
@@ -234,12 +233,12 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   // Playback state restored from last session (Rewind support)
   const initialPlaybackState = useMemo(() => StorageService.getLastPlaybackState(), []);
 
-  const [queue, setQueue] = useState<Song[]>(() => initialPlaybackState?.queue?.length ? initialPlaybackState.queue : INITIAL_SONGS);
+  const [queue, setQueue] = useState<Song[]>(() => (initialPlaybackState?.queue?.length ? initialPlaybackState.queue : []));
   const [queueIndex, setQueueIndex] = useState<number>(() => initialPlaybackState?.queueIndex ?? 0);
-  const [currentSong, setCurrentSong] = useState<Song | null>(() => initialPlaybackState?.song ?? INITIAL_SONGS[0]);
+  const [currentSong, setCurrentSong] = useState<Song | null>(() => initialPlaybackState?.song ?? null);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [currentTime, setCurrentTime] = useState<number>(() => initialPlaybackState?.currentTime ?? 0);
-  const [duration, setDuration] = useState<number>(() => initialPlaybackState?.duration ?? (INITIAL_SONGS[0].duration || 200));
+  const [duration, setDuration] = useState<number>(() => initialPlaybackState?.duration ?? 0);
   const [volume, setVolumeState] = useState<number>(85);
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [repeatMode, setRepeatMode] = useState<RepeatMode>('off');
@@ -294,8 +293,6 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     if (saved && saved.length > 0) return saved;
     return [
       { id: 'queue-main', name: 'Main Queue', songs: queue, queueIndex: 0, createdAt: Date.now() },
-      { id: 'queue-workout', name: 'Workout Session', songs: [INITIAL_SONGS[1], INITIAL_SONGS[0]], queueIndex: 0, createdAt: Date.now() },
-      { id: 'queue-focus', name: 'Focus & Study', songs: [INITIAL_SONGS[2], INITIAL_SONGS[3]], queueIndex: 0, createdAt: Date.now() },
     ];
   });
 
@@ -354,8 +351,8 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     setActiveQueueIdState(queueId);
     StorageService.saveActiveQueueId(queueId);
 
-    const targetSongs = target.songs && target.songs.length > 0 ? target.songs : INITIAL_SONGS;
-    const targetIdx = Math.min(target.queueIndex || 0, targetSongs.length - 1);
+    const targetSongs = target.songs && target.songs.length > 0 ? target.songs : [];
+    const targetIdx = targetSongs.length > 0 ? Math.min(target.queueIndex || 0, targetSongs.length - 1) : 0;
     setQueue(targetSongs);
     queueRef.current = targetSongs;
     setQueueIndex(targetIdx);
@@ -370,7 +367,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const createQueue = (name: string, initialSongs?: Song[]) => {
     hapticFeedback();
     const newId = `queue-${Date.now()}`;
-    const songsToUse = initialSongs && initialSongs.length > 0 ? initialSongs : (currentSong ? [currentSong] : INITIAL_SONGS);
+    const songsToUse = initialSongs && initialSongs.length > 0 ? initialSongs : (currentSong ? [currentSong] : []);
     const newQueueItem: NamedQueue = {
       id: newId,
       name: name.trim() || 'New Queue',
@@ -597,17 +594,6 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       setStorageEstimate(est);
       const cfg = await offlineCacheService.getCacheConfig();
       setCacheConfigState(cfg);
-
-      // Pre-cache popular initial tracks so offline works right away out of the box
-      if (all.length === 0 && INITIAL_SONGS.length >= 2) {
-        await offlineCacheService.cacheSong(INITIAL_SONGS[0]);
-        await offlineCacheService.cacheSong(INITIAL_SONGS[3]);
-        const updated = await offlineCacheService.getAllCachedSongs();
-        if (isMounted) {
-          setCachedTracks(updated);
-          setCachedSongIds(new Set(updated.map((s) => s.id)));
-        }
-      }
     };
     loadCache();
 

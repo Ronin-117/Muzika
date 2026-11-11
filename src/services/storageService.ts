@@ -1,5 +1,4 @@
 import { Song, Playlist, Artist, Album, EqualizerSettings, ThemeName, UserStats } from '../types/music';
-import { INITIAL_PLAYLISTS, INITIAL_SONGS } from '../data/mockCatalog';
 
 const STORAGE_KEYS = {
   LIKED_SONGS: 'muzika_liked_songs',
@@ -35,22 +34,12 @@ export const DEFAULT_EQUALIZER: EqualizerSettings = {
 };
 
 export const DEFAULT_USER_STATS: UserStats = {
-  totalMinutes: 142,
-  totalPlays: 48,
+  totalMinutes: 0,
+  totalPlays: 0,
   playHistory: [],
-  songPlayCounts: {
-    'yt-4NRXx6U8ABQ': 18,
-    'yt-kXYiU_JCYtU': 14,
-    'yt-jfKfPfyJRdk': 12,
-    'yt-OPf0YbXqDm0': 4,
-  },
-  artistPlayCounts: {
-    'The Weeknd': 18,
-    'Linkin Park': 14,
-    'Lofi Girl': 12,
-    'Mark Ronson ft. Bruno Mars': 4,
-  },
-  rankBadge: 'Silver Explorer',
+  songPlayCounts: {},
+  artistPlayCounts: {},
+  rankBadge: 'Bronze Newbie',
 };
 
 export class StorageService {
@@ -61,8 +50,7 @@ export class StorageService {
     } catch (e) {
       console.warn('Storage read error:', e);
     }
-    // Default initial liked songs
-    return [INITIAL_SONGS[0], INITIAL_SONGS[1]];
+    return [];
   }
 
   static saveLikedSongs(songs: Song[]): void {
@@ -80,7 +68,7 @@ export class StorageService {
     } catch (e) {
       console.warn('Storage read error:', e);
     }
-    return INITIAL_PLAYLISTS;
+    return [];
   }
 
   static savePlaylists(playlists: Playlist[]): void {
@@ -98,7 +86,7 @@ export class StorageService {
     } catch (e) {
       console.warn('Storage read error:', e);
     }
-    return [INITIAL_SONGS[0], INITIAL_SONGS[3], INITIAL_SONGS[1]];
+    return [];
   }
 
   static saveHistory(songs: Song[]): void {

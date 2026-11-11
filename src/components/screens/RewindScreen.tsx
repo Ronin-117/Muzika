@@ -1,11 +1,10 @@
 import React from 'react';
 import { useMusic } from '../../context/MusicContext';
-import { Trophy, Clock, PlayCircle, Award, Sparkles, Flame, Play } from 'lucide-react';
+import { Trophy, Clock, PlayCircle, Award, Sparkles, Flame, Play, Music } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { INITIAL_SONGS } from '../../data/mockCatalog';
 
 export const RewindScreen: React.FC = () => {
-  const { userStats, themeColors, playSong, hapticFeedback } = useMusic();
+  const { userStats, themeColors, playSong, hapticFeedback, likedSongs, history } = useMusic();
 
   const handleCelebrate = () => {
     hapticFeedback();
@@ -21,6 +20,9 @@ export const RewindScreen: React.FC = () => {
   const topArtists = Object.entries(userStats.artistPlayCounts)
     .sort(([, a], [, b]) => b - a)
     .slice(0, 5);
+
+  // Use real user songs for Heavy Rotation (liked songs or history)
+  const heavyRotationTracks = likedSongs.length > 0 ? likedSongs.slice(0, 4) : history.slice(0, 4);
 
   return (
     <div className="pb-36 pt-2 px-4 max-w-md mx-auto space-y-5">
@@ -88,67 +90,71 @@ export const RewindScreen: React.FC = () => {
       </div>
 
       {/* Top Artists Ranking */}
-      <section>
-        <div className="flex items-center gap-2 mb-3">
-          <Award className="w-4 h-4" style={{ color: themeColors.accent }} />
-          <h2 className="text-base font-bold">Your Top Artists</h2>
-        </div>
+      {topArtists.length > 0 && (
+        <section>
+          <div className="flex items-center gap-2 mb-3">
+            <Award className="w-4 h-4" style={{ color: themeColors.accent }} />
+            <h2 className="text-base font-bold">Your Top Artists</h2>
+          </div>
 
-        <div className="space-y-2">
-          {topArtists.map(([artistName, count], idx) => (
-            <div
-              key={artistName}
-              className="flex items-center justify-between p-3 rounded-2xl bg-white/5 border border-white/5"
-            >
-              <div className="flex items-center gap-3">
-                <span
-                  className="w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs"
-                  style={{
-                    backgroundColor: idx === 0 ? themeColors.accent : 'rgba(255,255,255,0.1)',
-                    color: '#fff',
-                  }}
-                >
-                  {idx + 1}
-                </span>
-                <span className="text-sm font-bold">{artistName}</span>
+          <div className="space-y-2">
+            {topArtists.map(([artistName, count], idx) => (
+              <div
+                key={artistName}
+                className="flex items-center justify-between p-3 rounded-2xl bg-white/5 border border-white/5"
+              >
+                <div className="flex items-center gap-3">
+                  <span
+                    className="w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs"
+                    style={{
+                      backgroundColor: idx === 0 ? themeColors.accent : 'rgba(255,255,255,0.1)',
+                      color: '#fff',
+                    }}
+                  >
+                    {idx + 1}
+                  </span>
+                  <span className="text-sm font-bold">{artistName}</span>
+                </div>
+                <span className="text-xs font-mono opacity-60">{count} plays</span>
               </div>
-              <span className="text-xs font-mono opacity-60">{count} plays</span>
-            </div>
-          ))}
-        </div>
-      </section>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Heavy Rotation Replay */}
-      <section>
-        <div className="flex items-center gap-2 mb-3">
-          <Flame className="w-4 h-4" style={{ color: themeColors.accent }} />
-          <h2 className="text-base font-bold">Heavy Rotation Tracks</h2>
-        </div>
+      {heavyRotationTracks.length > 0 && (
+        <section>
+          <div className="flex items-center gap-2 mb-3">
+            <Flame className="w-4 h-4" style={{ color: themeColors.accent }} />
+            <h2 className="text-base font-bold">Heavy Rotation Tracks</h2>
+          </div>
 
-        <div className="space-y-1.5">
-          {INITIAL_SONGS.slice(0, 3).map((song) => (
-            <div
-              key={song.id}
-              onClick={() => {
-                hapticFeedback();
-                playSong(song, INITIAL_SONGS);
-              }}
-              className="flex items-center justify-between p-2.5 rounded-2xl bg-white/5 hover:bg-white/10 transition cursor-pointer"
-            >
-              <div className="flex items-center gap-3 min-w-0 flex-1">
-                <div className="w-10 h-10 rounded-lg overflow-hidden shrink-0">
-                  <img src={song.thumbnailUrl} alt={song.title} className="w-full h-full object-cover" />
+          <div className="space-y-1.5">
+            {heavyRotationTracks.map((song) => (
+              <div
+                key={song.id}
+                onClick={() => {
+                  hapticFeedback();
+                  playSong(song, heavyRotationTracks);
+                }}
+                className="flex items-center justify-between p-2.5 rounded-2xl bg-white/5 hover:bg-white/10 transition cursor-pointer"
+              >
+                <div className="flex items-center gap-3 min-w-0 flex-1">
+                  <div className="w-10 h-10 rounded-lg overflow-hidden shrink-0">
+                    <img src={song.thumbnailUrl} alt={song.title} className="w-full h-full object-cover" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-bold truncate leading-tight">{song.title}</div>
+                    <div className="text-[11px] opacity-60 truncate">{song.artist}</div>
+                  </div>
                 </div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs font-bold truncate leading-tight">{song.title}</div>
-                  <div className="text-[11px] opacity-60 truncate">{song.artist}</div>
-                </div>
+                <Play className="w-4 h-4 opacity-40 shrink-0" />
               </div>
-              <Play className="w-4 h-4 opacity-40 shrink-0" />
-            </div>
-          ))}
-        </div>
-      </section>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 };

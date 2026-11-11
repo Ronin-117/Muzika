@@ -1,17 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { useMusic } from '../../context/MusicContext';
-import { MOOD_CATEGORIES, INITIAL_PLAYLISTS, INITIAL_SONGS } from '../../data/mockCatalog';
+import { MOOD_CATEGORIES } from '../../data/mockCatalog';
 import {
   Compass,
   Music,
   Disc,
   Play,
   Loader2,
-  Sparkles,
   Flame,
   CheckCircle2,
   Download,
   Heart,
+  Plus,
 } from 'lucide-react';
 import { Song } from '../../types/music';
 import { OnlineMusicService } from '../../services/onlineMusicService';
@@ -19,6 +19,7 @@ import { OnlineMusicService } from '../../services/onlineMusicService';
 export const ExploreScreen: React.FC = () => {
   const {
     playSong,
+    playlists,
     setSelectedPlaylist,
     themeColors,
     hapticFeedback,
@@ -26,6 +27,7 @@ export const ExploreScreen: React.FC = () => {
     cacheSong,
     toggleLike,
     isLiked,
+    setActiveTab,
   } = useMusic();
 
   const [selectedMood, setSelectedMood] = useState<string | null>(null);
@@ -39,18 +41,13 @@ export const ExploreScreen: React.FC = () => {
     const fetchCategorySongs = async () => {
       setIsLoading(true);
       try {
-        const query = selectedMood || 'Top Hits';
-        const tracks = await OnlineMusicService.fetchTracksByGenre(query, 25);
+        const query = selectedMood ? `${selectedMood} English Hits` : 'Top Worldwide English Hits 2025';
+        const tracks = await OnlineMusicService.searchOnlineMusic(query, 25);
         if (isMounted) {
-          if (tracks.length > 0) {
-            setOnlineSongs(tracks);
-          } else {
-            // fallback to initial songs if offline
-            setOnlineSongs(INITIAL_SONGS);
-          }
+          setOnlineSongs(tracks || []);
         }
       } catch (e) {
-        if (isMounted) setOnlineSongs(INITIAL_SONGS);
+        if (isMounted) setOnlineSongs([]);
       } finally {
         if (isMounted) setIsLoading(false);
       }
@@ -136,7 +133,7 @@ export const ExploreScreen: React.FC = () => {
             <Loader2 className="w-6 h-6 animate-spin text-emerald-400" />
             <span>Fetching live charts...</span>
           </div>
-        ) : (
+        ) : onlineSongs.length > 0 ? (
           <div className="space-y-1.5">
             {onlineSongs.map((song, idx) => {
               const cached = isSongCached(song.id);
@@ -220,35 +217,59 @@ export const ExploreScreen: React.FC = () => {
               );
             })}
           </div>
+        ) : (
+          <div className="p-8 text-center text-xs opacity-50 bg-white/5 rounded-2xl">
+            No tracks found for this mood. Try selecting another mood above or search for tracks directly.
+          </div>
         )}
       </section>
 
-      {/* Featured Curated Playlists */}
+      {/* Featured User Playlists */}
       <section>
-        <h2 className="text-base font-bold mb-3">Curated Radio & Mixes</h2>
-        <div className="space-y-3">
-          {INITIAL_PLAYLISTS.map((pl) => (
-            <div
-              key={pl.id}
-              onClick={() => {
-                hapticFeedback();
-                setSelectedPlaylist(pl);
-              }}
-              className="flex items-center justify-between p-3 rounded-2xl bg-white/5 hover:bg-white/10 transition border border-white/5 cursor-pointer"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-xl overflow-hidden shrink-0 shadow-md">
-                  <img src={pl.coverUrl} alt={pl.title} className="w-full h-full object-cover" />
+        <h2 className="text-base font-bold mb-3">Your Playlists</h2>
+        {playlists.length > 0 ? (
+          <div className="space-y-3">
+            {playlists.map((pl) => (
+              <div
+                key={pl.id}
+                onClick={() => {
+                  hapticFeedback();
+                  setSelectedPlaylist(pl);
+                }}
+                className="flex items-center justify-between p-3 rounded-2xl bg-white/5 hover:bg-white/10 transition border border-white/5 cursor-pointer"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-xl overflow-hidden shrink-0 shadow-md">
+                    <img src={pl.coverUrl} alt={pl.title} className="w-full h-full object-cover" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-bold text-white">{pl.title}</div>
+                    <div className="text-xs opacity-60">{pl.songs.length} tracks • {pl.description || 'Playlist'}</div>
+                  </div>
                 </div>
-                <div>
-                  <div className="text-sm font-bold text-white">{pl.title}</div>
-                  <div className="text-xs opacity-60">{pl.description}</div>
-                </div>
+                <Disc className="w-5 h-5 opacity-40 shrink-0" />
               </div>
-              <Disc className="w-5 h-5 opacity-40 shrink-0" />
+            ))}
+          </div>
+        ) : (
+          <div
+            onClick={() => setActiveTab('library')}
+            className="p-4 rounded-2xl bg-white/5 border border-white/5 flex items-center justify-between cursor-pointer hover:bg-white/10 transition group"
+          >
+            <div className="flex items-center gap-3">
+              <div
+                className="w-10 h-10 rounded-xl flex items-center justify-center text-white shrink-0"
+                style={{ backgroundColor: themeColors.accent }}
+              >
+                <Plus className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="text-xs font-bold text-white">Create Your First Playlist</div>
+                <div className="text-[11px] opacity-60">Organize your favorite songs in Library</div>
+              </div>
             </div>
-          ))}
-        </div>
+          </div>
+        )}
       </section>
     </div>
   );

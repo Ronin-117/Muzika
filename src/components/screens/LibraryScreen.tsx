@@ -1,6 +1,5 @@
 import React, { useState, useRef, useMemo } from 'react';
 import { useMusic } from '../../context/MusicContext';
-import { INITIAL_ARTISTS, INITIAL_ALBUMS } from '../../data/mockCatalog';
 import {
   FolderHeart,
   ListPlus,
@@ -77,25 +76,19 @@ export const LibraryScreen: React.FC = () => {
     setShowCreateModal(false);
   };
 
-  // Combine Saved + Imported Artists (fallback to INITIAL_ARTISTS only when library is empty)
+  // Combine Saved + Imported Artists
   const allArtists = useMemo(() => {
     const map = new Map<string, Artist>();
     savedArtists.forEach((a) => map.set(a.id, a));
     importedArtists.forEach((a) => map.set(a.id, a));
-    if (map.size === 0) {
-      INITIAL_ARTISTS.forEach((a) => map.set(a.id, a));
-    }
     return Array.from(map.values());
   }, [savedArtists, importedArtists]);
 
-  // Combine Saved + Imported Albums (fallback to INITIAL_ALBUMS only when library is empty)
+  // Combine Saved + Imported Albums
   const allAlbums = useMemo(() => {
     const map = new Map<string, Album>();
     savedAlbums.forEach((a) => map.set(a.id, a));
     importedAlbums.forEach((a) => map.set(a.id, a));
-    if (map.size === 0) {
-      INITIAL_ALBUMS.forEach((a) => map.set(a.id, a));
-    }
     return Array.from(map.values());
   }, [savedAlbums, importedAlbums]);
 

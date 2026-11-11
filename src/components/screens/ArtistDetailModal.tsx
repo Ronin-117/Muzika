@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { useMusic } from '../../context/MusicContext';
-import { INITIAL_ARTISTS } from '../../data/mockCatalog';
 import { ArrowLeft, Play, Users, Heart, UserPlus, Check, Loader2, Music } from 'lucide-react';
 import { OnlineMusicService } from '../../services/onlineMusicService';
 import { Song } from '../../types/music';
@@ -26,12 +25,11 @@ export const ArtistDetailModal: React.FC = () => {
   const [topSongs, setTopSongs] = useState<Song[]>([]);
   const [isLoadingSongs, setIsLoadingSongs] = useState(false);
 
-  // Determine artist entity from context or storage/catalog
+  // Determine artist entity from context or storage
   const artist =
     selectedArtist ||
     savedArtists.find((a) => a.id === selectedArtistId) ||
-    importedArtists.find((a) => a.id === selectedArtistId) ||
-    INITIAL_ARTISTS.find((a) => a.id === selectedArtistId);
+    importedArtists.find((a) => a.id === selectedArtistId);
 
   useEffect(() => {
     if (!artist) {
