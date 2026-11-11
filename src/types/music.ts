@@ -89,6 +89,9 @@ export interface EqualizerSettings {
   preset: string;
   bands: EqualizerBands;
   bassBoost: number; // 0 to 100
+  preamp?: number; // -12 to +12 dB
+  surround?: number; // 0 to 100
+  limiter?: boolean;
 }
 
 export type ThemeName = 'riplay' | 'amoled' | 'spotify' | 'cyan' | 'purple' | 'dynamic';

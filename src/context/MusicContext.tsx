@@ -27,6 +27,7 @@ import { RiplaySqliteImporter, RiplayImportSummary } from '../services/riplaySql
 import { OnlineMusicService } from '../services/onlineMusicService';
 import { getSubAudibleAudioUri, audioFocusManager } from '../utils/audioWakeLock';
 import { extractDynamicPalette } from '../utils/colorExtractor';
+import { webAudioEqualizer } from '../utils/webAudioEqualizer';
 
 interface MusicContextType {
   // Current playback state
@@ -255,6 +256,14 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [blacklist, setBlacklist] = useState(() => StorageService.getBlacklist());
   const [userStats, setUserStats] = useState<UserStats>(() => StorageService.getUserStats());
   const [equalizerSettings, setEqSettings] = useState<EqualizerSettings>(() => StorageService.getEqualizer());
+
+  // Real-time Web Audio API DSP Equalizer synchronization
+  useEffect(() => {
+    if (htmlAudioRef.current) {
+      webAudioEqualizer.init(htmlAudioRef.current);
+      webAudioEqualizer.applySettings(equalizerSettings);
+    }
+  }, [equalizerSettings]);
   const [theme, setThemeState] = useState<ThemeName>(() => StorageService.getTheme());
   const [dynamicColors, setDynamicColors] = useState<ThemeColors | null>(null);
   const [sleepTimerSeconds, setSleepTimerSeconds] = useState<number | null>(null);
