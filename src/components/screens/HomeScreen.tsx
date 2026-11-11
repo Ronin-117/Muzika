@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useMusic } from '../../context/MusicContext';
 import { MOOD_CATEGORIES } from '../../data/mockCatalog';
-import { Play, Sparkles, Flame, Smartphone, Heart, ChevronRight, CheckCircle2, Loader2, Music, ListPlus, Plus } from 'lucide-react';
+import { Play, Sparkles, Flame, Smartphone, Heart, ChevronRight, CheckCircle2, Loader2, Music, ListPlus, Plus, MoreVertical } from 'lucide-react';
 import { usePWAInstall } from '../../hooks/usePWAInstall';
 import { Song, Artist } from '../../types/music';
 import { OnlineMusicService } from '../../services/onlineMusicService';
@@ -28,6 +28,7 @@ export const HomeScreen: React.FC = () => {
     cachedTracks,
     importedArtists,
     savedArtists,
+    setSongOptionsMenuTarget,
   } = useMusic();
   const { isInstalled } = usePWAInstall();
 
@@ -305,16 +306,27 @@ export const HomeScreen: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
                       <button
                         onClick={() => toggleLike(song)}
-                        className="p-2 rounded-full hover:bg-white/10 transition"
+                        className="p-1.5 rounded-full hover:bg-white/10 transition"
                       >
                         <Heart
                           className={`w-4 h-4 transition ${
                             liked ? 'fill-rose-500 text-rose-500' : 'text-white/40'
                           }`}
                         />
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          hapticFeedback();
+                          setSongOptionsMenuTarget({ song });
+                        }}
+                        className="p-1.5 rounded-full hover:bg-white/10 transition text-white/40 hover:text-white"
+                        title="Song options & Add to Playlist"
+                      >
+                        <MoreVertical className="w-4 h-4" />
                       </button>
                     </div>
                   </div>

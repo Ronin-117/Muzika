@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { useMusic } from '../../context/MusicContext';
-import { Trash2, Music2, Play, Volume2, LocateFixed, Layers, Plus, Edit2, Check, X, ChevronDown } from 'lucide-react';
+import { Trash2, Music2, Play, Volume2, LocateFixed, Layers, Plus, Edit2, Check, X, ChevronDown, MoreVertical } from 'lucide-react';
 
 export const QueueView: React.FC = () => {
   const {
@@ -19,6 +19,7 @@ export const QueueView: React.FC = () => {
     createQueue,
     renameQueue,
     deleteQueue,
+    setSongOptionsMenuTarget,
   } = useMusic();
 
   const activeItemRef = useRef<HTMLDivElement | null>(null);
@@ -202,6 +203,17 @@ export const QueueView: React.FC = () => {
                   {Math.floor((song.duration || 180) / 60)}:
                   {((song.duration || 180) % 60).toString().padStart(2, '0')}
                 </span>
+
+                <button
+                  onClick={() => {
+                    hapticFeedback();
+                    setSongOptionsMenuTarget({ song });
+                  }}
+                  className="p-1 rounded-lg opacity-40 hover:opacity-100 hover:bg-white/10 text-white transition active:scale-95"
+                  title="Song options & Add to Playlist"
+                >
+                  <MoreVertical className="w-3.5 h-3.5" />
+                </button>
 
                 {queue.length > 1 && (
                   <button

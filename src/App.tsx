@@ -21,6 +21,9 @@ import { AlbumDetailModal } from './components/screens/AlbumDetailModal';
 import { ExitConfirmModal } from './components/common/ExitConfirmModal';
 import { PWAUpdateToast } from './components/common/PWAUpdateToast';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
+import { AddToPlaylistModal } from './components/common/AddToPlaylistModal';
+import { SongOptionsMenuModal } from './components/common/SongOptionsMenuModal';
+import { ToastNotification } from './components/common/ToastNotification';
 import { WifiOff } from 'lucide-react';
 
 function OfflineBanner() {
@@ -90,6 +93,11 @@ function MuzikaApp() {
       <PWAInstallModal />
       <RiplayImportModal isOpen={isRiplayImportOpen} onClose={() => setIsRiplayImportOpen(false)} />
       <ExitConfirmModal />
+
+      {/* Global Quick Action Modals & Toasts */}
+      <AddToPlaylistModal />
+      <SongOptionsMenuModal />
+      <ToastNotification />
 
       {/* Persistent YouTube Iframe Embed Container */}
       <div

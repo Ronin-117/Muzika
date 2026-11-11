@@ -12,6 +12,7 @@ import {
   Download,
   Heart,
   Plus,
+  MoreVertical,
 } from 'lucide-react';
 import { Song } from '../../types/music';
 import { OnlineMusicService } from '../../services/onlineMusicService';
@@ -28,6 +29,7 @@ export const ExploreScreen: React.FC = () => {
     toggleLike,
     isLiked,
     setActiveTab,
+    setSongOptionsMenuTarget,
   } = useMusic();
 
   const [selectedMood, setSelectedMood] = useState<string | null>(null);
@@ -207,6 +209,19 @@ export const ExploreScreen: React.FC = () => {
                       }`}
                     >
                       <Heart className={`w-4 h-4 ${liked ? 'fill-rose-500' : ''}`} />
+                    </button>
+
+                    {/* More Options */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        hapticFeedback();
+                        setSongOptionsMenuTarget({ song });
+                      }}
+                      className="p-1.5 rounded-full text-white/40 hover:text-white hover:bg-white/10 transition"
+                      title="Song options & Add to Playlist"
+                    >
+                      <MoreVertical className="w-4 h-4" />
                     </button>
 
                     <span className="text-xs font-mono opacity-40 ml-1 min-w-[32px] text-right">

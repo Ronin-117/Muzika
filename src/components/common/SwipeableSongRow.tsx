@@ -18,7 +18,7 @@ export const SwipeableSongRow: React.FC<SwipeableSongRowProps> = ({
   className = '',
   disabled = false,
 }) => {
-  const { addToQueue, playNextInQueue, hapticFeedback } = useMusic();
+  const { addToQueue, playNextInQueue, setSongOptionsMenuTarget, hapticFeedback } = useMusic();
   const [translateX, setTranslateX] = useState(0);
   const [isSwiping, setIsSwiping] = useState(false);
   const [addedMode, setAddedMode] = useState<'next' | 'end' | null>(null);
@@ -26,13 +26,32 @@ export const SwipeableSongRow: React.FC<SwipeableSongRowProps> = ({
   const startXRef = useRef(0);
   const startYRef = useRef(0);
   const isHorizontalSwipeRef = useRef<boolean | null>(null);
+  const longPressTimerRef = useRef<number | null>(null);
+  const isLongPressRef = useRef<boolean>(false);
+
+  const clearLongPressTimer = () => {
+    if (longPressTimerRef.current) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
 
   const handleTouchStart = (e: React.TouchEvent) => {
     if (disabled) return;
     startXRef.current = e.touches[0].clientX;
     startYRef.current = e.touches[0].clientY;
     isHorizontalSwipeRef.current = null;
+    isLongPressRef.current = false;
     setIsSwiping(true);
+
+    clearLongPressTimer();
+    longPressTimerRef.current = window.setTimeout(() => {
+      isLongPressRef.current = true;
+      hapticFeedback();
+      setSongOptionsMenuTarget({ song });
+      setIsSwiping(false);
+      setTranslateX(0);
+    }, 450);
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
@@ -42,6 +61,11 @@ export const SwipeableSongRow: React.FC<SwipeableSongRowProps> = ({
     const currentY = e.touches[0].clientY;
     const deltaX = currentX - startXRef.current;
     const deltaY = currentY - startYRef.current;
+
+    // Cancel long press if finger moved significantly
+    if (Math.abs(deltaX) > 10 || Math.abs(deltaY) > 10) {
+      clearLongPressTimer();
+    }
 
     // Determine swipe axis on first movement
     if (isHorizontalSwipeRef.current === null) {
@@ -59,7 +83,11 @@ export const SwipeableSongRow: React.FC<SwipeableSongRowProps> = ({
   };
 
   const handleTouchEnd = () => {
-    if (disabled || !isSwiping) return;
+    clearLongPressTimer();
+    if (disabled || !isSwiping || isLongPressRef.current) {
+      setIsSwiping(false);
+      return;
+    }
     setIsSwiping(false);
 
     const threshold = 65; // minimum swipe distance
@@ -83,6 +111,12 @@ export const SwipeableSongRow: React.FC<SwipeableSongRowProps> = ({
 
     setTranslateX(0);
     isHorizontalSwipeRef.current = null;
+  };
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    hapticFeedback();
+    setSongOptionsMenuTarget({ song });
   };
 
   const isRightSwipe = translateX > 0;
@@ -126,6 +160,7 @@ export const SwipeableSongRow: React.FC<SwipeableSongRowProps> = ({
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
         onTouchCancel={handleTouchEnd}
+        onContextMenu={handleContextMenu}
         className={`relative z-10 w-full transition-transform ${
           isSwiping ? 'transition-none' : 'duration-200 ease-out'
         }`}

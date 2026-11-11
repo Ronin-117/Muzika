@@ -13,6 +13,7 @@ import {
   ListVideo,
   ListOrdered,
   Layers,
+  MoreVertical,
 } from 'lucide-react';
 import { SwipeableSongRow } from '../common/SwipeableSongRow';
 
@@ -28,6 +29,7 @@ export const PlaylistDetailModal: React.FC = () => {
     cacheSong,
     removeCachedSong,
     addPlaylistToQueue,
+    setSongOptionsMenuTarget,
   } = useMusic();
 
   const [onlyOffline, setOnlyOffline] = useState(false);
@@ -283,6 +285,17 @@ export const PlaylistDetailModal: React.FC = () => {
                         title={cached ? 'Available Offline (Click to remove)' : 'Download for offline play'}
                       >
                         {cached ? <CheckCircle2 className="w-4 h-4" /> : <DownloadCloud className="w-4 h-4" />}
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          hapticFeedback();
+                          setSongOptionsMenuTarget({ song });
+                        }}
+                        className="p-1.5 opacity-40 hover:opacity-100 hover:text-white transition"
+                        title="Song options & Add to Playlist"
+                      >
+                        <MoreVertical className="w-4 h-4" />
                       </button>
 
                       <button

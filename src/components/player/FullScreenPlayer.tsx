@@ -24,6 +24,7 @@ import {
   Ban,
   DownloadCloud,
   CheckCircle2,
+  Plus,
 } from 'lucide-react';
 import { LyricsView } from './LyricsView';
 import { QueueView } from './QueueView';
@@ -59,6 +60,7 @@ export const FullScreenPlayer: React.FC = () => {
     isSongCached,
     cacheSong,
     removeCachedSong,
+    setAddToPlaylistTargetSong,
   } = useMusic();
 
   const [showOptions, setShowOptions] = useState(false);
@@ -145,64 +147,90 @@ export const FullScreenPlayer: React.FC = () => {
               hapticFeedback();
               setShowOptions(!showOptions);
             }}
-            className="p-2 rounded-full hover:bg-white/10 transition text-white/80"
+            className="p-2 rounded-full hover:bg-white/10 transition text-white/80 active:scale-95"
+            title="Player options"
           >
             <MoreVertical className="w-5 h-5" />
           </button>
 
-          {/* Options Dropdown Menu */}
+          {/* High Z-Index Player Options Modal Dropdown */}
           {showOptions && (
-            <div
-              className="absolute right-0 top-10 w-52 rounded-2xl p-2 shadow-2xl z-50 border border-white/10 animate-in fade-in zoom-in-95 text-xs font-medium space-y-1"
-              style={{ backgroundColor: themeColors.background1 }}
-            >
-              <button
-                onClick={() => {
-                  hapticFeedback();
-                  setIsEqualizerOpen(true);
-                  setShowOptions(false);
-                }}
-                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-white/10 text-left transition"
-              >
-                <Sliders className="w-4 h-4" /> Equalizer & FX
-              </button>
+            <>
+              {/* Invisible backdrop to close dropdown on tap outside */}
+              <div
+                onClick={() => setShowOptions(false)}
+                className="fixed inset-0 z-[90] bg-black/40 backdrop-blur-xs"
+              />
 
-              <button
-                onClick={() => {
-                  hapticFeedback();
-                  setIsSleepTimerOpen(true);
-                  setShowOptions(false);
-                }}
-                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-white/10 text-left transition"
+              <div
+                className="fixed right-4 top-14 w-56 rounded-3xl p-2.5 shadow-2xl z-[100] border border-white/15 text-xs font-semibold space-y-1 animate-in fade-in zoom-in-95 duration-150"
+                style={{ backgroundColor: themeColors.background1, color: themeColors.text }}
               >
-                <Moon className="w-4 h-4" /> Sleep Timer
-              </button>
+                <button
+                  onClick={() => {
+                    hapticFeedback();
+                    setShowOptions(false);
+                    setAddToPlaylistTargetSong(currentSong);
+                  }}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/10 text-left transition text-white"
+                >
+                  <Plus className="w-4 h-4 text-amber-400" />
+                  <span>Add to Playlist</span>
+                </button>
 
-              <button
-                onClick={() => {
-                  hapticFeedback();
-                  setIsSongInfoOpen(true);
-                  setShowOptions(false);
-                }}
-                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-white/10 text-left transition"
-              >
-                <Info className="w-4 h-4" /> Stats for Nerds
-              </button>
+                <button
+                  onClick={() => {
+                    hapticFeedback();
+                    setIsEqualizerOpen(true);
+                    setShowOptions(false);
+                  }}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/10 text-left transition"
+                >
+                  <Sliders className="w-4 h-4 text-purple-400" />
+                  <span>Equalizer & FX</span>
+                </button>
 
-              <button
-                onClick={handleShare}
-                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-white/10 text-left transition"
-              >
-                <Share2 className="w-4 h-4" /> Share Track
-              </button>
+                <button
+                  onClick={() => {
+                    hapticFeedback();
+                    setIsSleepTimerOpen(true);
+                    setShowOptions(false);
+                  }}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/10 text-left transition"
+                >
+                  <Moon className="w-4 h-4 text-cyan-400" />
+                  <span>Sleep Timer</span>
+                </button>
 
-              <button
-                onClick={handleBlacklistThis}
-                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-white/10 text-left transition text-red-400"
-              >
-                <Ban className="w-4 h-4" /> Blacklist Track
-              </button>
-            </div>
+                <button
+                  onClick={() => {
+                    hapticFeedback();
+                    setIsSongInfoOpen(true);
+                    setShowOptions(false);
+                  }}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/10 text-left transition"
+                >
+                  <Info className="w-4 h-4 text-emerald-400" />
+                  <span>Stats for Nerds</span>
+                </button>
+
+                <button
+                  onClick={handleShare}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/10 text-left transition"
+                >
+                  <Share2 className="w-4 h-4 text-orange-400" />
+                  <span>Share Track Link</span>
+                </button>
+
+                <button
+                  onClick={handleBlacklistThis}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/10 text-left transition text-red-400"
+                >
+                  <Ban className="w-4 h-4" />
+                  <span>Blacklist Track</span>
+                </button>
+              </div>
+            </>
           )}
         </div>
       </div>

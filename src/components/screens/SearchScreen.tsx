@@ -22,6 +22,7 @@ import {
   Bookmark,
   Check,
   UserPlus,
+  MoreVertical,
 } from 'lucide-react';
 import { Song, Artist, Album } from '../../types/music';
 import { OnlineMusicService } from '../../services/onlineMusicService';
@@ -51,6 +52,7 @@ export const SearchScreen: React.FC = () => {
     isArtistFollowed,
     toggleFollowArtist,
     addToQueue,
+    setSongOptionsMenuTarget,
   } = useMusic();
 
   const [query, setQuery] = useState('');
@@ -559,17 +561,17 @@ export const SearchScreen: React.FC = () => {
                             <Heart className={`w-4 h-4 ${liked ? 'fill-rose-500' : ''}`} />
                           </button>
 
-                          {/* Add to Queue */}
+                          {/* More Options */}
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
                               hapticFeedback();
-                              addToQueue(song);
+                              setSongOptionsMenuTarget({ song });
                             }}
-                            title="Add to queue"
+                            title="Song options & Add to Playlist"
                             className="p-1.5 rounded-full text-white/40 hover:text-white hover:bg-white/10 transition"
                           >
-                            <Plus className="w-4 h-4" />
+                            <MoreVertical className="w-4 h-4" />
                           </button>
 
                           <span className="text-xs opacity-40 font-mono ml-1 min-w-[32px] text-right">

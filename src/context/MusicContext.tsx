@@ -174,6 +174,14 @@ interface MusicContextType {
   savedAlbums: Album[];
   toggleSaveAlbum: (album: Album) => void;
   isAlbumSaved: (albumId: string) => boolean;
+
+  // Modals, Quick Actions & Toast Notifications
+  addToPlaylistTargetSong: Song | null;
+  setAddToPlaylistTargetSong: (song: Song | null) => void;
+  songOptionsMenuTarget: { song: Song; queueContext?: Song[] } | null;
+  setSongOptionsMenuTarget: (target: { song: Song; queueContext?: Song[] } | null) => void;
+  toastMessage: string | null;
+  showToast: (message: string) => void;
 }
 
 const MusicContext = createContext<MusicContextType | null>(null);
@@ -215,6 +223,20 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [selectedArtistId, setSelectedArtistIdState] = useState<string | null>(null);
   const [selectedArtist, setSelectedArtist] = useState<Artist | null>(null);
   const [selectedAlbum, setSelectedAlbumState] = useState<Album | null>(null);
+
+  // Quick Action Modals & Toast State
+  const [addToPlaylistTargetSong, setAddToPlaylistTargetSong] = useState<Song | null>(null);
+  const [songOptionsMenuTarget, setSongOptionsMenuTarget] = useState<{ song: Song; queueContext?: Song[] } | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
+
+  const showToast = (message: string) => {
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    setToastMessage(message);
+    toastTimerRef.current = window.setTimeout(() => {
+      setToastMessage(null);
+    }, 2500);
+  };
 
   const setIsPlayerOpen = (open: boolean) => setIsPlayerOpenState(open);
   const setIsQueueOpen = (open: boolean) => setIsQueueOpenState(open);
@@ -1392,11 +1414,19 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   const addToPlaylist = (playlistId: string, song: Song) => {
     hapticFeedback();
+    let added = false;
+    let targetPlTitle = 'Playlist';
     setPlaylists((prev) => {
       const updated = prev.map((pl) => {
         if (pl.id === playlistId) {
+          targetPlTitle = pl.title;
           if (!pl.songs.some((s) => s.id === song.id)) {
-            return { ...pl, songs: [...pl.songs, song] };
+            added = true;
+            const newPl = { ...pl, songs: [...pl.songs, song] };
+            if (selectedPlaylist?.id === playlistId) {
+              setSelectedPlaylistState(newPl);
+            }
+            return newPl;
           }
         }
         return pl;
@@ -1404,6 +1434,11 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       StorageService.savePlaylists(updated);
       return updated;
     });
+    if (added) {
+      showToast(`Added "${song.title}" to ${targetPlTitle}`);
+    } else {
+      showToast(`"${song.title}" is already in ${targetPlTitle}`);
+    }
   };
 
   const removeFromPlaylist = (playlistId: string, songId: string) => {
@@ -1808,6 +1843,12 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         savedAlbums,
         toggleSaveAlbum,
         isAlbumSaved,
+        addToPlaylistTargetSong,
+        setAddToPlaylistTargetSong,
+        songOptionsMenuTarget,
+        setSongOptionsMenuTarget,
+        toastMessage,
+        showToast,
         enableMultipleQueues,
         setEnableMultipleQueues,
         queues,
