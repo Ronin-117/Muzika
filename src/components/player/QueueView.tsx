@@ -24,12 +24,13 @@ export const QueueView: React.FC = () => {
   const activeItemRef = useRef<HTMLDivElement | null>(null);
   const listContainerRef = useRef<HTMLDivElement | null>(null);
 
-  // Selector modal state
+  // Selector & Delete confirmation state
   const [isSelectorOpen, setIsSelectorOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [newQueueName, setNewQueueName] = useState('');
   const [editingQueueId, setEditingQueueId] = useState<string | null>(null);
   const [editQueueName, setEditQueueName] = useState('');
+  const [deletingQueue, setDeletingQueue] = useState<{ id: string; name: string } | null>(null);
 
   // Automatically scroll currently playing song into view
   useEffect(() => {
@@ -217,14 +218,17 @@ export const QueueView: React.FC = () => {
         })}
       </div>
 
-      {/* Multiple Queues Manager Modal */}
+      {/* Multiple Queues Manager Modal - Guaranteed top stacking (z-[100]) */}
       {isSelectorOpen && (
         <div
-          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fadeIn"
-          onClick={() => setIsSelectorOpen(false)}
+          className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-xl flex items-center justify-center p-3 sm:p-4 animate-fadeIn"
+          onClick={() => {
+            setIsSelectorOpen(false);
+            setDeletingQueue(null);
+          }}
         >
           <div
-            className="w-full max-w-md bg-neutral-900 border border-white/10 rounded-t-3xl sm:rounded-3xl p-5 space-y-4 max-h-[85vh] flex flex-col"
+            className="w-full max-w-md bg-neutral-900 border border-white/15 rounded-3xl p-5 space-y-4 max-h-[80vh] flex flex-col shadow-2xl my-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between pb-2 border-b border-white/10 shrink-0">
@@ -233,49 +237,80 @@ export const QueueView: React.FC = () => {
                 <h3 className="font-black text-base text-white">Switch Listening Queue</h3>
               </div>
               <button
-                onClick={() => setIsSelectorOpen(false)}
-                className="p-1.5 rounded-full bg-white/5 hover:bg-white/10 text-white/70"
+                onClick={() => {
+                  setIsSelectorOpen(false);
+                  setDeletingQueue(null);
+                }}
+                className="p-1.5 rounded-full bg-white/5 hover:bg-white/10 text-white/70 hover:text-white"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Create Queue Button or Input */}
-            <div className="shrink-0">
-              {!isCreating ? (
-                <button
-                  onClick={() => setIsCreating(true)}
-                  className="w-full py-2.5 px-3 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/10 font-bold text-xs flex items-center justify-center gap-2 text-white transition active:scale-95"
-                >
-                  <Plus className="w-4 h-4 text-emerald-400" />
-                  <span>Create New Queue (e.g. Workout, Focus)</span>
-                </button>
-              ) : (
-                <form onSubmit={handleCreateNew} className="flex gap-2">
-                  <input
-                    type="text"
-                    value={newQueueName}
-                    onChange={(e) => setNewQueueName(e.target.value)}
-                    placeholder="Queue Name (e.g. Late Night Lofi)"
-                    autoFocus
-                    className="flex-1 bg-black/40 border border-white/20 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-400"
-                  />
+            {/* In-App Delete Confirmation Prompt */}
+            {deletingQueue ? (
+              <div className="p-4 rounded-2xl bg-red-500/10 border border-red-500/30 text-center space-y-3 animate-fadeIn shrink-0">
+                <div className="text-sm font-bold text-red-400">Delete Queue "{deletingQueue.name}"?</div>
+                <p className="text-xs opacity-75 leading-relaxed">
+                  Are you sure you want to delete this listening queue? This action cannot be undone.
+                </p>
+                <div className="flex items-center justify-center gap-2 pt-1">
                   <button
-                    type="submit"
-                    className="px-3 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-xs transition"
-                  >
-                    Create
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setIsCreating(false)}
-                    className="px-2 py-2 rounded-xl bg-white/10 text-white/70 hover:bg-white/20 text-xs"
+                    onClick={() => setDeletingQueue(null)}
+                    className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-white font-semibold text-xs transition"
                   >
                     Cancel
                   </button>
-                </form>
-              )}
-            </div>
+                  <button
+                    onClick={() => {
+                      hapticFeedback();
+                      deleteQueue(deletingQueue.id);
+                      setDeletingQueue(null);
+                    }}
+                    className="px-4 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-white font-bold text-xs shadow-lg transition active:scale-95"
+                  >
+                    Yes, Delete Queue
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* Create Queue Button or Form */
+              <div className="shrink-0">
+                {!isCreating ? (
+                  <button
+                    onClick={() => setIsCreating(true)}
+                    className="w-full py-2.5 px-3 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/10 font-bold text-xs flex items-center justify-center gap-2 text-white transition active:scale-95"
+                  >
+                    <Plus className="w-4 h-4 text-emerald-400" />
+                    <span>Create New Queue (e.g. Workout, Focus)</span>
+                  </button>
+                ) : (
+                  <form onSubmit={handleCreateNew} className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newQueueName}
+                      onChange={(e) => setNewQueueName(e.target.value)}
+                      placeholder="Queue Name (e.g. Late Night Lofi)"
+                      autoFocus
+                      className="flex-1 bg-black/40 border border-white/20 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-400"
+                    />
+                    <button
+                      type="submit"
+                      className="px-3 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-xs transition"
+                    >
+                      Create
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsCreating(false)}
+                      className="px-2 py-2 rounded-xl bg-white/10 text-white/70 hover:bg-white/20 text-xs"
+                    >
+                      Cancel
+                    </button>
+                  </form>
+                )}
+              </div>
+            )}
 
             {/* Queue List */}
             <div className="flex-1 overflow-y-auto space-y-2 no-scrollbar pr-1">
@@ -334,7 +369,7 @@ export const QueueView: React.FC = () => {
                     )}
 
                     {!isEditing && (
-                      <div className="flex items-center gap-1 shrink-0">
+                      <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
                         <button
                           onClick={() => {
                             setEditingQueueId(q.id);
@@ -348,7 +383,10 @@ export const QueueView: React.FC = () => {
 
                         {q.id !== 'queue-main' && (
                           <button
-                            onClick={() => deleteQueue(q.id)}
+                            onClick={() => {
+                              hapticFeedback();
+                              setDeletingQueue({ id: q.id, name: q.name });
+                            }}
                             className="p-1.5 rounded-lg opacity-40 hover:opacity-100 hover:bg-red-500/20 text-red-400 transition"
                             title="Delete queue"
                           >
