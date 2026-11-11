@@ -771,9 +771,16 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     const handlePlay = () => {
       if (activeEngineRef.current === 'html') {
         setIsPlaying(true);
+        webAudioEqualizer.ensureActive(audio);
         if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
           navigator.mediaSession.playbackState = 'playing';
         }
+      }
+    };
+
+    const handlePlaying = () => {
+      if (activeEngineRef.current === 'html') {
+        webAudioEqualizer.ensureActive(audio);
       }
     };
 
@@ -806,6 +813,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     audio.addEventListener('durationchange', handleLoadedMetadata);
     audio.addEventListener('ended', handleEnded);
     audio.addEventListener('play', handlePlay);
+    audio.addEventListener('playing', handlePlaying);
     audio.addEventListener('pause', handlePause);
 
     return () => {
@@ -814,6 +822,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       audio.removeEventListener('durationchange', handleLoadedMetadata);
       audio.removeEventListener('ended', handleEnded);
       audio.removeEventListener('play', handlePlay);
+      audio.removeEventListener('playing', handlePlaying);
       audio.removeEventListener('pause', handlePause);
       audio.pause();
     };

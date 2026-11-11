@@ -1,7 +1,7 @@
 # ==========================================
 # Stage 1: Build the React + Vite PWA application (Native host architecture for speed)
 # ==========================================
-FROM --platform=$BUILDPLATFORM node:20-alpine AS builder
+FROM --platform=$BUILDPLATFORM node:20-slim AS builder
 
 WORKDIR /app
 
@@ -24,7 +24,7 @@ RUN npm prune --omit=dev --legacy-peer-deps
 # ==========================================
 # Stage 2: Serve Full-Stack Muzika (Node + Express + PWA)
 # ==========================================
-FROM node:20-alpine
+FROM node:20-slim
 
 WORKDIR /app
 ENV NODE_ENV=production
@@ -38,10 +38,11 @@ COPY --from=builder /app/public ./public
 
 EXPOSE 80
 
-# Healthcheck to verify Muzika API is actively responding (supports both IPv4 and dynamic PORT env var)
+# Healthcheck to verify Muzika API is actively responding (using built-in Node.js http module)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget --quiet --tries=1 --spider "http://127.0.0.1:${PORT:-80}/api/health" || exit 1
+  CMD node -e "require('http').get('http://127.0.0.1:' + (process.env.PORT || 80) + '/api/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1); }).on('error', () => process.exit(1))"
 
 # Start Muzika full-stack server using compiled JavaScript bundle
 CMD ["node", "dist/server.js"]
+
 

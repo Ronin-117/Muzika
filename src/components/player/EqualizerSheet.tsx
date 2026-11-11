@@ -245,12 +245,13 @@ export const EqualizerSheet: React.FC = () => {
 
         {/* 5-Band Channel Columns (All 5 channels clearly visible on mobile) */}
         <div>
-          <div className="text-xs uppercase tracking-wider font-bold opacity-60 mb-3">
-            5-Band Channel Frequencies
+          <div className="text-xs uppercase tracking-wider font-bold opacity-60 mb-2 flex items-center justify-between">
+            <span>5-Band Frequencies</span>
+            <span className="text-[10px] font-mono opacity-50">60Hz - 14kHz</span>
           </div>
 
           <div
-            className={`grid grid-cols-5 gap-2 p-3 sm:p-4 rounded-2xl bg-black/40 border border-white/5 transition-opacity ${
+            className={`grid grid-cols-5 gap-1 sm:gap-3 p-2 sm:p-4 rounded-2xl bg-black/40 border border-white/5 transition-opacity min-w-0 w-full ${
               !equalizerSettings.enabled ? 'opacity-40 pointer-events-none' : ''
             }`}
           >
@@ -260,10 +261,10 @@ export const EqualizerSheet: React.FC = () => {
               const percent = Math.round(((value + 12) / 24) * 100);
 
               return (
-                <div key={key} className="flex flex-col items-center gap-2 select-none">
+                <div key={key} className="flex flex-col items-center gap-1.5 select-none min-w-0">
                   {/* dB Badge */}
                   <span
-                    className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-md ${
+                    className={`text-[9px] sm:text-[10px] font-mono font-bold px-1 sm:px-1.5 py-0.5 rounded-md text-center w-full truncate ${
                       value > 0
                         ? 'bg-emerald-500/20 text-emerald-400'
                         : value < 0
@@ -271,18 +272,18 @@ export const EqualizerSheet: React.FC = () => {
                         : 'bg-white/10 text-white/60'
                     }`}
                   >
-                    {value > 0 ? `+${value}` : value} dB
+                    {value > 0 ? `+${value}` : value}dB
                   </span>
 
                   {/* Vertical Channel Column Track */}
-                  <div className="relative w-9 h-36 bg-white/5 rounded-2xl border border-white/10 flex flex-col items-center justify-end p-1 overflow-hidden group">
+                  <div className="relative w-full max-w-[40px] h-32 sm:h-36 bg-white/5 rounded-xl sm:rounded-2xl border border-white/10 flex flex-col items-center justify-end p-1 overflow-hidden group">
                     {/* Fill Level Bar */}
                     <div
-                      className="w-full rounded-xl transition-all duration-150"
+                      className="w-full rounded-lg sm:rounded-xl transition-all duration-150"
                       style={{
                         height: `${Math.max(8, percent)}%`,
                         backgroundColor: themeColors.accent,
-                        boxShadow: `0 0 12px ${themeColors.accent}80`,
+                        boxShadow: `0 0 10px ${themeColors.accent}80`,
                       }}
                     />
 
@@ -303,9 +304,9 @@ export const EqualizerSheet: React.FC = () => {
                   </div>
 
                   {/* Frequency Labels */}
-                  <div className="text-center min-w-0">
-                    <div className="text-[11px] font-bold text-white leading-tight">{label}</div>
-                    <div className="text-[9px] opacity-40 font-mono mt-0.5">{sub}</div>
+                  <div className="text-center min-w-0 w-full">
+                    <div className="text-[10px] sm:text-[11px] font-bold text-white leading-tight truncate">{label}</div>
+                    <div className="text-[8px] sm:text-[9px] opacity-40 font-mono mt-0.5 truncate">{sub}</div>
                   </div>
                 </div>
               );

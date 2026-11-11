@@ -15,7 +15,17 @@ class WebAudioEqualizerEngine {
   private isInitialized = false;
 
   public init(audioElement: HTMLAudioElement) {
-    if (this.isInitialized) return;
+    if (!audioElement.crossOrigin) {
+      try {
+        audioElement.crossOrigin = 'anonymous';
+      } catch (e) {
+        // Ignore if already playing
+      }
+    }
+    if (this.isInitialized) {
+      this.resume();
+      return;
+    }
     try {
       const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
       if (!AudioCtxClass) return;
@@ -78,13 +88,22 @@ class WebAudioEqualizerEngine {
         .connect(this.audioCtx.destination);
 
       this.isInitialized = true;
+      this.resume();
     } catch (err) {
       console.warn('Web Audio API Equalizer initialization note:', err);
     }
   }
 
+  public ensureActive(audioElement: HTMLAudioElement) {
+    if (!this.isInitialized) {
+      this.init(audioElement);
+    } else {
+      this.resume();
+    }
+  }
+
   public resume() {
-    if (this.audioCtx && this.audioCtx.state === 'suspended') {
+    if (this.audioCtx && (this.audioCtx.state === 'suspended' || (this.audioCtx.state as string) === 'interrupted')) {
       this.audioCtx.resume().catch(() => {});
     }
   }
