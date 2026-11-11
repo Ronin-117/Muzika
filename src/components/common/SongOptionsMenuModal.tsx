@@ -12,6 +12,9 @@ import {
   Disc,
   Share2,
   Ban,
+  Sliders,
+  Moon,
+  Info,
 } from 'lucide-react';
 
 export const SongOptionsMenuModal: React.FC = () => {
@@ -29,6 +32,9 @@ export const SongOptionsMenuModal: React.FC = () => {
     setSelectedArtistId,
     setSelectedAlbum,
     addToBlacklist,
+    setIsEqualizerOpen,
+    setIsSleepTimerOpen,
+    setIsSongInfoOpen,
     themeColors,
     hapticFeedback,
     showToast,
@@ -87,6 +93,24 @@ export const SongOptionsMenuModal: React.FC = () => {
     handleClose();
   };
 
+  const handleEqualizer = () => {
+    hapticFeedback();
+    setIsEqualizerOpen(true);
+    handleClose();
+  };
+
+  const handleSleepTimer = () => {
+    hapticFeedback();
+    setIsSleepTimerOpen(true);
+    handleClose();
+  };
+
+  const handleStatsForNerds = () => {
+    hapticFeedback();
+    setIsSongInfoOpen(true);
+    handleClose();
+  };
+
   const handleGoToArtist = () => {
     hapticFeedback();
     setSelectedArtistId(song.artistId || song.artist);
@@ -132,11 +156,11 @@ export const SongOptionsMenuModal: React.FC = () => {
   return (
     <div
       onClick={handleClose}
-      className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-200"
+      className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center bg-black/85 backdrop-blur-xl p-4 animate-in fade-in duration-200"
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-sm rounded-3xl p-5 shadow-2xl space-y-4 border border-white/10 animate-in slide-in-from-bottom-6 duration-200"
+        className="w-full max-w-sm rounded-3xl p-5 shadow-2xl space-y-4 border border-white/15 animate-in slide-in-from-bottom-6 duration-200 my-auto"
         style={{ backgroundColor: themeColors.background1, color: themeColors.text }}
       >
         {/* Header with Song Thumbnail */}
@@ -159,7 +183,7 @@ export const SongOptionsMenuModal: React.FC = () => {
         </div>
 
         {/* Options List */}
-        <div className="space-y-1 text-xs font-medium max-h-80 overflow-y-auto pr-1">
+        <div className="space-y-1 text-xs font-medium max-h-80 overflow-y-auto pr-1 no-scrollbar">
           <button
             onClick={handlePlayNext}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/10 text-left transition"
@@ -181,7 +205,23 @@ export const SongOptionsMenuModal: React.FC = () => {
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/10 text-left transition"
           >
             <Plus className="w-4 h-4 text-amber-400" />
-            <span>Add to Playlist</span>
+            <span className="font-bold text-white">Add to Playlist</span>
+          </button>
+
+          <button
+            onClick={handleEqualizer}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/10 text-left transition"
+          >
+            <Sliders className="w-4 h-4 text-purple-400" />
+            <span>Equalizer & DSP FX</span>
+          </button>
+
+          <button
+            onClick={handleSleepTimer}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/10 text-left transition"
+          >
+            <Moon className="w-4 h-4 text-cyan-400" />
+            <span>Sleep Timer</span>
           </button>
 
           <button
@@ -207,6 +247,14 @@ export const SongOptionsMenuModal: React.FC = () => {
                 <span>Download for Offline Listening</span>
               </>
             )}
+          </button>
+
+          <button
+            onClick={handleStatsForNerds}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/10 text-left transition"
+          >
+            <Info className="w-4 h-4 text-emerald-400" />
+            <span>Stats for Nerds</span>
           </button>
 
           <button
