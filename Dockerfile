@@ -18,6 +18,9 @@ RUN cp node_modules/sql.js/dist/sql-wasm.wasm public/sql-wasm.wasm 2>/dev/null |
 # Build the production PWA bundle and bundled Node server
 RUN npm run build
 
+# Prune dev dependencies natively on host architecture (avoids QEMU emulation during multi-arch builds)
+RUN npm prune --omit=dev --legacy-peer-deps
+
 # ==========================================
 # Stage 2: Serve Full-Stack Muzika (Node + Express + PWA)
 # ==========================================
@@ -27,14 +30,11 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=80
 
-COPY package*.json ./
-
-# Install only production dependencies for lightweight execution
-RUN npm install --omit=dev --legacy-peer-deps
-
+# Copy pruned production dependencies and build artifacts from builder stage
+COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/public ./public
-COPY --from=builder /app/src ./src
 
 EXPOSE 80
 
@@ -44,3 +44,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 
 # Start Muzika full-stack server using compiled JavaScript bundle
 CMD ["node", "dist/server.js"]
+

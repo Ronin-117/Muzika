@@ -26,6 +26,12 @@ jobs:
           fi
           echo "username=$LOWER_USER" >> $GITHUB_OUTPUT
 
+      - name: Extract App Version
+        id: app_version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
       - name: Set up QEMU (Emulation for multi-platform architectures)
         uses: docker/setup-qemu-action@v3
 
@@ -48,6 +54,6 @@ jobs:
           tags: |
             ${{ steps.docker_prep.outputs.username }}/muzika:latest
             ${{ steps.docker_prep.outputs.username }}/muzika:${{ github.sha }}
-            ${{ steps.docker_prep.outputs.username }}/muzika:2.6.0
+            ${{ steps.docker_prep.outputs.username }}/muzika:${{ steps.app_version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
