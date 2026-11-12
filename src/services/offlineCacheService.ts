@@ -39,6 +39,11 @@ class OfflineCacheService {
       this.initDB().then(() => {
         this.refreshCachedIds();
         this.requestPersistence().catch(() => {});
+        this.autoRepairCorruptedTracks().catch(() => {});
+      });
+
+      window.addEventListener('online', () => {
+        this.autoRepairCorruptedTracks().catch(() => {});
       });
     }
   }
@@ -88,7 +93,9 @@ class OfflineCacheService {
   async refreshCachedIds(): Promise<Set<string>> {
     try {
       const songs = await this.getAllCachedSongs();
-      this.cachedIds = new Set(songs.map((s) => s.id));
+      // Only songs that actually contain a valid audio blob (>1000 bytes) are considered cached
+      const valid = songs.filter((s) => s.audioBlob && s.audioBlob.size > 1000);
+      this.cachedIds = new Set(valid.map((s) => s.id));
       return this.cachedIds;
     } catch {
       return this.cachedIds;
@@ -105,7 +112,10 @@ class OfflineCacheService {
       const tx = db.transaction(STORE_SONGS, 'readonly');
       const store = tx.objectStore(STORE_SONGS);
       const req = store.get(songId);
-      req.onsuccess = () => resolve(!!req.result);
+      req.onsuccess = () => {
+        const rec = req.result as CachedTrackRecord | undefined;
+        resolve(!!(rec && rec.audioBlob && rec.audioBlob.size > 1000));
+      };
       req.onerror = () => resolve(false);
     });
   }
@@ -115,15 +125,55 @@ class OfflineCacheService {
     try {
       const db = await this.initDB();
 
-      // If no blob provided, attempt to download real audio
-      let finalBlob = audioBlob;
+      // Retrieve existing record if present to guard against overwriting valid cached audio
+      const existingRecord = await new Promise<CachedTrackRecord | undefined>((resolve) => {
+        const tx = db.transaction(STORE_SONGS, 'readonly');
+        const store = tx.objectStore(STORE_SONGS);
+        const req = store.get(song.id);
+        req.onsuccess = () => resolve(req.result as CachedTrackRecord | undefined);
+        req.onerror = () => resolve(undefined);
+      });
+
+      // 1. Determine audio blob:
+      let finalBlob: Blob | undefined = audioBlob && audioBlob.size > 1000 ? audioBlob : undefined;
+
+      // CRITICAL: If no new valid blob was provided, KEEP the existing audio blob!
+      if (!finalBlob && existingRecord?.audioBlob && existingRecord.audioBlob.size > 1000) {
+        finalBlob = existingRecord.audioBlob;
+      }
+
+      // If still no blob, attempt to download real audio only when device is online
       if (!finalBlob) {
-        finalBlob = (await OnlineMusicService.fetchAudioBlob(song)) || undefined;
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          // Offline mode: cannot download network audio.
+          // If song already has audio, it was preserved above. If not, abort to prevent corrupting records.
+          return false;
+        }
+
+        try {
+          const downloaded = await OnlineMusicService.fetchAudioBlob(song);
+          if (downloaded && downloaded.size > 1000) {
+            finalBlob = downloaded;
+          }
+        } catch {
+          // download failed
+        }
+      }
+
+      // CRITICAL CHECK:
+      // If we STILL do not have a valid audio blob (>1000 bytes):
+      if (!finalBlob || finalBlob.size <= 1000) {
+        if (existingRecord?.audioBlob && existingRecord.audioBlob.size > 1000) {
+          finalBlob = existingRecord.audioBlob;
+        } else {
+          // NEVER save hollow/corrupted 0.2MB record with 0 audio bytes!
+          return false;
+        }
       }
 
       // Also cache album artwork locally if possible
       let artworkBlob: Blob | undefined;
-      if (song.thumbnailUrl && song.thumbnailUrl.startsWith('http')) {
+      if (song.thumbnailUrl && song.thumbnailUrl.startsWith('http') && (typeof navigator === 'undefined' || navigator.onLine)) {
         try {
           const imgResp = await fetch(song.thumbnailUrl);
           if (imgResp.ok) {
@@ -134,20 +184,19 @@ class OfflineCacheService {
         }
       }
 
-      // Calculate real stored data size (never 0)
-      const audioSize = finalBlob && finalBlob.size > 1000 ? finalBlob.size : 0;
+      // Calculate real stored data size (never fake 0.2MB)
+      const audioSize = finalBlob.size;
       const artworkSize = artworkBlob && artworkBlob.size > 500 ? artworkBlob.size : 180000;
-      const metadataSize = 25000; // estimated metadata + lyrics bytes
-      const sizeBytes = audioSize > 0 ? audioSize + artworkSize : artworkSize + metadataSize;
+      const sizeBytes = audioSize + artworkSize;
 
       const record: CachedTrackRecord = {
         id: song.id,
         song: {
           ...song,
-          streamUrl: song.streamUrl,
+          streamUrl: song.streamUrl || existingRecord?.song?.streamUrl,
         },
-        audioBlob: finalBlob && finalBlob.size > 1000 ? finalBlob : undefined,
-        cachedAt: Date.now(),
+        audioBlob: finalBlob,
+        cachedAt: existingRecord?.cachedAt || Date.now(),
         lastAccessedAt: Date.now(),
         sizeBytes,
       };
@@ -181,13 +230,24 @@ class OfflineCacheService {
           const record = req.result as CachedTrackRecord | undefined;
           if (!record) return resolve(null);
 
-          // Update lastAccessedAt
+          // If record does not contain a valid audioBlob (>1000 bytes)
+          if (!record.audioBlob || record.audioBlob.size <= 1000) {
+            // Hollow corrupted record detected - queue auto-repair if online
+            if (typeof navigator !== 'undefined' && navigator.onLine) {
+              this.cacheSong(record.song).catch(() => {});
+            }
+            return resolve(null);
+          }
+
+          // Update lastAccessedAt without modifying the record's audioBlob
           record.lastAccessedAt = Date.now();
           store.put(record);
 
           let audioUrl = '';
-          if (record.audioBlob && record.audioBlob.size > 1000) {
+          try {
             audioUrl = URL.createObjectURL(record.audioBlob);
+          } catch {
+            return resolve(null);
           }
 
           resolve({
@@ -200,6 +260,27 @@ class OfflineCacheService {
       });
     } catch {
       return null;
+    }
+  }
+
+  // Detects any legacy hollow 0.2MB tracks and re-caches real audio in background when online
+  async autoRepairCorruptedTracks(): Promise<void> {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+    try {
+      const all = await this.getAllCachedSongs();
+      const corrupted = all.filter((r) => !r.audioBlob || r.audioBlob.size <= 1000);
+      if (corrupted.length === 0) return;
+
+      for (const item of corrupted) {
+        if (typeof navigator !== 'undefined' && !navigator.onLine) break;
+        try {
+          await this.cacheSong(item.song);
+        } catch {
+          // ignore
+        }
+      }
+    } catch {
+      // ignore
     }
   }
 

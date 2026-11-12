@@ -344,17 +344,33 @@ export class OnlineMusicService {
    * Guarantees that saved audio matches complete song duration (never 30s preview clips).
    */
   static async fetchAudioBlob(song: Song): Promise<Blob | null> {
+    const cleanTitle = song.title.replace(/\([^)]*\)|\[[^\]]*\]/g, '').trim();
+    const vidId = song.youtubeId || (song.id.startsWith('yt-') ? song.id.replace('yt-', '') : song.id);
+
+    // 1. Direct streamUrl fetch
     const streamUrl = await this.resolveStreamUrl(song);
-    if (streamUrl) {
+    if (streamUrl && !streamUrl.startsWith('/api/stream')) {
       try {
         const resp = await fetch(streamUrl, { mode: 'cors' });
         if (resp.ok) {
           const blob = await resp.blob();
-          if (blob.size > 100000) return blob;
+          if (blob && blob.size > 50000) return blob;
         }
       } catch {
-        // ignore
+        // Fall through to server proxy
       }
+    }
+
+    // 2. Fetch via internal server proxy (guaranteed same-origin, no CORS restriction, full length)
+    try {
+      const proxyUrl = `/api/stream?title=${encodeURIComponent(cleanTitle)}&artist=${encodeURIComponent(song.artist)}&id=${encodeURIComponent(vidId)}`;
+      const resp = await fetch(proxyUrl);
+      if (resp.ok) {
+        const blob = await resp.blob();
+        if (blob && blob.size > 50000) return blob;
+      }
+    } catch {
+      // ignore
     }
 
     return null;

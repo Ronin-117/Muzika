@@ -333,6 +333,7 @@ export const LibraryScreen: React.FC = () => {
               {cachedTracks.map((record) => {
                 const song = record.song;
                 const sizeMb = (record.sizeBytes / (1024 * 1024)).toFixed(1);
+                const hasValidAudio = !!(record.audioBlob && record.audioBlob.size > 1000);
                 return (
                   <SwipeableSongRow key={song.id} song={song}>
                     <div
@@ -349,9 +350,15 @@ export const LibraryScreen: React.FC = () => {
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-1.5">
                             <div className="text-sm font-semibold truncate leading-tight">{song.title}</div>
-                            <span className="shrink-0 flex items-center gap-0.5 text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">
-                              <CheckCircle2 className="w-2.5 h-2.5" /> Offline
-                            </span>
+                            {hasValidAudio ? (
+                              <span className="shrink-0 flex items-center gap-0.5 text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">
+                                <CheckCircle2 className="w-2.5 h-2.5" /> Offline
+                              </span>
+                            ) : (
+                              <span className="shrink-0 flex items-center gap-0.5 text-[9px] font-bold text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">
+                                Syncing Audio...
+                              </span>
+                            )}
                           </div>
                           <div className="text-xs opacity-60 truncate mt-0.5">
                             {song.artist} • {sizeMb} MB
