@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useMusic } from '../../context/MusicContext';
-import { ArrowLeft, Play, Shuffle, Disc, Heart, CheckCircle2, Bookmark, Check, Loader2, DownloadCloud, ListPlus, ListOrdered, ListVideo } from 'lucide-react';
+import { ArrowLeft, Play, Shuffle, Disc, Heart, CheckCircle2, Bookmark, Check, Loader2, DownloadCloud, ListPlus, ListOrdered, ListVideo, X } from 'lucide-react';
 import { OnlineMusicService } from '../../services/onlineMusicService';
 import { Song } from '../../types/music';
 import { SwipeableSongRow } from '../common/SwipeableSongRow';
@@ -15,8 +15,12 @@ export const AlbumDetailModal: React.FC = () => {
     isLiked,
     hapticFeedback,
     isSongCached,
+    isSongCaching,
     cacheSong,
     removeCachedSong,
+    batchCacheState,
+    cacheSongsBatch,
+    cancelBatchCache,
     toggleSaveAlbum,
     isAlbumSaved,
     addPlaylistToQueue,
@@ -196,6 +200,32 @@ export const AlbumDetailModal: React.FC = () => {
             {saved ? <Check className="w-4 h-4 text-emerald-400" /> : <Bookmark className="w-4 h-4" />}
             <span>{saved ? 'Saved' : 'Save'}</span>
           </button>
+          {currentSongs.length > 0 && (
+            batchCacheState?.active && batchCacheState.targetId === selectedAlbum.id ? (
+              <button
+                onClick={cancelBatchCache}
+                className="py-3 px-3 rounded-2xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 border border-amber-500/30"
+              >
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>{batchCacheState.completed + batchCacheState.failed}/{batchCacheState.total}</span>
+                <X className="w-3.5 h-3.5" />
+              </button>
+            ) : currentSongs.some((s) => !isSongCached(s.id)) ? (
+              <button
+                onClick={() => cacheSongsBatch(currentSongs, selectedAlbum.id, selectedAlbum.title)}
+                disabled={!!batchCacheState?.active}
+                className="py-3 px-3 rounded-2xl bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 border border-cyan-500/30 disabled:opacity-40"
+              >
+                <DownloadCloud className="w-4 h-4" />
+                <span>Cache All</span>
+              </button>
+            ) : (
+              <div className="py-3 px-3 rounded-2xl bg-emerald-500/15 text-emerald-400 font-bold text-xs flex items-center justify-center gap-1.5 border border-emerald-500/30">
+                <CheckCircle2 className="w-4 h-4" />
+                <span>All Cached</span>
+              </div>
+            )
+          )}
         </div>
 
         {/* Add to Queue Options Modal */}
@@ -276,6 +306,7 @@ export const AlbumDetailModal: React.FC = () => {
               {currentSongs.map((song, idx) => {
                 const liked = isLiked(song.id);
                 const cached = isSongCached(song.id);
+                const isCaching = isSongCaching(song.id);
                 return (
                   <SwipeableSongRow key={song.id} song={song}>
                     <div
@@ -318,14 +349,23 @@ export const AlbumDetailModal: React.FC = () => {
                         {/* Offline Cache Download Button */}
                         <button
                           onClick={(e) => handleToggleCache(e, song)}
+                          disabled={isCaching}
                           className={`p-1.5 rounded-full transition ${
                             cached
                               ? 'text-emerald-400 bg-emerald-500/10'
+                              : isCaching
+                              ? 'text-cyan-400 bg-cyan-500/10'
                               : 'text-white/40 hover:text-white hover:bg-white/10'
                           }`}
-                          title={cached ? 'Cached Offline' : 'Save for offline'}
+                          title={isCaching ? 'Downloading...' : cached ? 'Cached Offline (Click to remove)' : 'Save for offline'}
                         >
-                          {cached ? <CheckCircle2 className="w-4 h-4" /> : <DownloadCloud className="w-4 h-4" />}
+                          {isCaching ? (
+                            <Loader2 className="w-4 h-4 animate-spin text-cyan-400" />
+                          ) : cached ? (
+                            <CheckCircle2 className="w-4 h-4" />
+                          ) : (
+                            <DownloadCloud className="w-4 h-4" />
+                          )}
                         </button>
 
                         <button

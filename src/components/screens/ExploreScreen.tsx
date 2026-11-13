@@ -25,7 +25,9 @@ export const ExploreScreen: React.FC = () => {
     themeColors,
     hapticFeedback,
     isSongCached,
+    isSongCaching,
     cacheSong,
+    removeCachedSong,
     toggleLike,
     isLiked,
     setActiveTab,
@@ -65,6 +67,10 @@ export const ExploreScreen: React.FC = () => {
   const handleCacheTrack = async (e: React.MouseEvent, song: Song) => {
     e.stopPropagation();
     hapticFeedback();
+    if (isSongCached(song.id)) {
+      await removeCachedSong(song.id);
+      return;
+    }
     setCachingId(song.id);
     try {
       await cacheSong(song);
@@ -140,7 +146,7 @@ export const ExploreScreen: React.FC = () => {
             {onlineSongs.map((song, idx) => {
               const cached = isSongCached(song.id);
               const liked = isLiked(song.id);
-              const isCaching = cachingId === song.id;
+              const isCaching = cachingId === song.id || isSongCaching(song.id);
 
               return (
                 <div

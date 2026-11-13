@@ -265,9 +265,10 @@ export class OnlineMusicService {
    * for any track so it plays from 0:00 to the very end with mobile screen-off support.
    * Uses strict artist+title+duration matching so covers/remixes are never hijacked by wrong artists.
    */
-  static async resolveStreamUrl(song: Song): Promise<string | undefined> {
+  static async resolveStreamUrl(song: Song, forceRefresh = false): Promise<string | undefined> {
     // 1. If song already has a direct valid audio stream URL, return it immediately
     if (
+      !forceRefresh &&
       song.streamUrl &&
       !song.streamUrl.startsWith('/api/stream') &&
       !song.streamUrl.includes('itunes.apple.com')
@@ -275,12 +276,14 @@ export class OnlineMusicService {
       return song.streamUrl;
     }
 
-    const cleanTitle = song.title.replace(/\([^)]*\)|\[[^\]]*\]/g, '').trim();
+    const rawTitle = (song.title || '').trim();
+    const cleanTitle = rawTitle.replace(/\([^)]*\)|\[[^\]]*\]/g, '').trim();
     const vidId = song.youtubeId || (song.id.startsWith('yt-') ? song.id.replace('yt-', '') : '');
 
-    // 2. Query full-stack backend /api/stream endpoint with vidId & duration for strict matching
+    // 2. Query full-stack backend /api/stream endpoint with full title (preserving feat.), vidId & duration
     try {
-      const backendUrl = `/api/stream?title=${encodeURIComponent(cleanTitle)}&artist=${encodeURIComponent(song.artist || '')}&id=${encodeURIComponent(vidId)}&duration=${song.duration || 0}&json=true`;
+      const refreshParam = forceRefresh ? '&refresh=1' : '';
+      const backendUrl = `/api/stream?title=${encodeURIComponent(rawTitle)}&artist=${encodeURIComponent(song.artist || '')}&id=${encodeURIComponent(vidId)}&duration=${song.duration || 0}&json=true${refreshParam}`;
       const res = await fetch(backendUrl);
       if (res.ok) {
         const data = await res.json();
@@ -495,30 +498,39 @@ export class OnlineMusicService {
    * Guarantees that saved audio matches complete song duration (never 30s preview clips).
    */
   static async fetchAudioBlob(song: Song): Promise<Blob | null> {
-    const cleanTitle = song.title.replace(/\([^)]*\)|\[[^\]]*\]/g, '').trim();
+    const rawTitle = (song.title || '').trim();
     const vidId = song.youtubeId || (song.id.startsWith('yt-') ? song.id.replace('yt-', '') : song.id);
 
-    // 1. Direct streamUrl fetch
-    const streamUrl = await this.resolveStreamUrl(song);
+    const normalizeAudioBlob = (blob: Blob, contentType?: string | null): Blob | null => {
+      if (!blob || blob.size <= 50000) return null;
+      const mime = blob.type && blob.type !== 'application/octet-stream' ? blob.type : (contentType || 'audio/mp4');
+      if (mime.includes('json') || mime.includes('html') || mime.includes('text')) return null;
+      return blob.type === mime ? blob : new Blob([blob], { type: mime });
+    };
+
+    // 1. Direct streamUrl fetch (fast CDN direct download)
+    const streamUrl = await this.resolveStreamUrl(song, false);
     if (streamUrl && !streamUrl.startsWith('/api/stream')) {
       try {
         const resp = await fetch(streamUrl, { mode: 'cors' });
         if (resp.ok) {
-          const blob = await resp.blob();
-          if (blob && blob.size > 50000) return blob;
+          const rawBlob = await resp.blob();
+          const validBlob = normalizeAudioBlob(rawBlob, resp.headers.get('Content-Type'));
+          if (validBlob) return validBlob;
         }
       } catch {
         // Fall through to server proxy
       }
     }
 
-    // 2. Fetch via internal server proxy (guaranteed same-origin, no CORS restriction, full length)
+    // 2. Fetch via internal server proxy (same-origin, bypasses CORS & SW cloning, auto-refreshes stale URLs)
     try {
-      const proxyUrl = `/api/stream?title=${encodeURIComponent(cleanTitle)}&artist=${encodeURIComponent(song.artist)}&id=${encodeURIComponent(vidId)}&duration=${song.duration || 0}`;
+      const proxyUrl = `/api/stream?title=${encodeURIComponent(rawTitle)}&artist=${encodeURIComponent(song.artist || '')}&id=${encodeURIComponent(vidId)}&duration=${song.duration || 0}&download=1&refresh=1`;
       const resp = await fetch(proxyUrl);
       if (resp.ok) {
-        const blob = await resp.blob();
-        if (blob && blob.size > 50000) return blob;
+        const rawBlob = await resp.blob();
+        const validBlob = normalizeAudioBlob(rawBlob, resp.headers.get('Content-Type'));
+        if (validBlob) return validBlob;
       }
     } catch {
       // ignore

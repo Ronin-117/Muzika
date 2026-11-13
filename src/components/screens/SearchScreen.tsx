@@ -38,7 +38,9 @@ export const SearchScreen: React.FC = () => {
     themeColors,
     hapticFeedback,
     isSongCached,
+    isSongCaching,
     cacheSong,
+    removeCachedSong,
     likedSongs,
     toggleLike,
     isLiked,
@@ -159,6 +161,10 @@ export const SearchScreen: React.FC = () => {
   const handleCacheTrack = async (e: React.MouseEvent, song: Song) => {
     e.stopPropagation();
     hapticFeedback();
+    if (isSongCached(song.id)) {
+      await removeCachedSong(song.id);
+      return;
+    }
     setCachingSongId(song.id);
     try {
       await cacheSong(song);
@@ -486,7 +492,7 @@ export const SearchScreen: React.FC = () => {
                 {combinedSongs.map((song) => {
                   const cached = isSongCached(song.id);
                   const liked = isLiked(song.id);
-                  const isCaching = cachingSongId === song.id;
+                  const isCaching = cachingSongId === song.id || isSongCaching(song.id);
 
                   return (
                     <SwipeableSongRow key={song.id} song={song}>

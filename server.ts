@@ -2,6 +2,7 @@ import express, { Request, Response } from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { Innertube, ClientType, UniversalCache } from 'youtubei.js';
+import { Ytdl, chooseFormat } from '@distube/ytdl-core';
 import { APP_VERSION, APP_BUILD, APP_RELEASE_NAME } from './src/version';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -508,6 +509,57 @@ function isStrictTrackMatch(
   return true;
 }
 
+let ytdlInstance: Ytdl | null = null;
+function getYtdl(): Ytdl {
+  if (!ytdlInstance) {
+    ytdlInstance = new Ytdl();
+  }
+  return ytdlInstance;
+}
+
+function buildStreamSearchQueries(rawTitle: string, rawArtist: string): string[] {
+  const queries: string[] = [];
+  const pushUnique = (q: string) => {
+    const clean = q.replace(/\s+/g, ' ').trim();
+    if (clean && !queries.includes(clean)) queries.push(clean);
+  };
+
+  // Extract featured artist names from "(feat. X)" / "[ft. X]" before stripping brackets
+  const featMatches = Array.from(
+    rawTitle.matchAll(/[\(\[]\s*(?:feat\.?|ft\.?|with)\s+([^\)\]]+)[\)\]]/gi)
+  )
+    .map((m) => m[1].replace(/[&,]/g, ' ').trim())
+    .filter(Boolean);
+
+  const baseTitle = rawTitle
+    .replace(/\([^)]*\)|\[[^\]]*\]/g, ' ')
+    .replace(/\b(official\s*(?:music\s*)?video|lyric\s*video|lyrics|audio|hd|4k)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const primaryArtist = rawArtist
+    .split(/,|&|\bfeat\.?\b|\bft\.?\b|\bx\b/i)[0]
+    ?.trim() || rawArtist;
+
+  if (featMatches.length > 0 && baseTitle) {
+    pushUnique(`${baseTitle} ${featMatches.join(' ')} ${primaryArtist}`.trim());
+  }
+  if (baseTitle && rawArtist) {
+    pushUnique(`${baseTitle} ${rawArtist}`.trim());
+  }
+  if (baseTitle && primaryArtist && primaryArtist !== rawArtist) {
+    pushUnique(`${baseTitle} ${primaryArtist}`.trim());
+  }
+  if (rawTitle && rawArtist) {
+    pushUnique(`${rawTitle} ${rawArtist}`.trim());
+  }
+  if (!rawArtist && baseTitle) {
+    pushUnique(baseTitle);
+  }
+
+  return queries.slice(0, 3);
+}
+
 async function fetchYouTubeOembedMeta(vidId: string): Promise<{ title: string; artist: string; thumbnailUrl: string } | null> {
   if (!vidId || vidId.length < 6) return null;
   try {
@@ -516,10 +568,32 @@ async function fetchYouTubeOembedMeta(vidId: string): Promise<{ title: string; a
     if (!resp.ok) return null;
     const data: any = await resp.json();
     if (!data?.title) return null;
-    const rawAuthor = String(data.author_name || '').replace(/\s*-\s*Topic$/i, '').trim();
+
+    let parsedTitle = String(data.title).trim();
+    let parsedArtist = String(data.author_name || '')
+      .replace(/\s*-\s*Topic$/i, '')
+      .replace(/VEVO$/i, '')
+      .trim();
+
+    // Parse "Artist - Song Title" format common on YouTube official & label uploads
+    const dashParts = parsedTitle.split(/\s+[-–—]\s+/);
+    if (dashParts.length >= 2 && dashParts[0].length >= 2 && dashParts[0].length <= 45) {
+      const candidateArtist = dashParts[0].trim();
+      const candidateTitle = dashParts.slice(1).join(' - ').trim();
+      const isGenericChannel =
+        !parsedArtist ||
+        /records|music|t-series|sony|zee|warner|atlantic|universal|official|lyrics|nation|channel|topic/i.test(
+          parsedArtist
+        );
+      if (isGenericChannel || candidateArtist.toLowerCase().includes(parsedArtist.toLowerCase().slice(0, 4))) {
+        parsedArtist = candidateArtist;
+        parsedTitle = candidateTitle;
+      }
+    }
+
     return {
-      title: String(data.title).trim(),
-      artist: rawAuthor || 'Unknown Artist',
+      title: parsedTitle,
+      artist: parsedArtist || 'Unknown Artist',
       thumbnailUrl: String(data.thumbnail_url || `https://i.ytimg.com/vi/${vidId}/hqdefault.jpg`),
     };
   } catch {
@@ -534,6 +608,7 @@ app.get('/api/stream', async (req: Request, res: Response) => {
   const rawId = String(req.query.id || '').trim();
   const vidId = rawId.replace(/^yt-/, '');
   const reqDuration = parseInt(String(req.query.duration || '0'), 10) || 0;
+  const forceRefresh = req.query.refresh === '1' || req.query.refresh === 'true';
 
   // Set permissive CORS headers for media streaming & range scrubbing
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -571,32 +646,26 @@ app.get('/api/stream', async (req: Request, res: Response) => {
   }
 
   try {
-    let streamInfo = streamCache.get(cacheKey);
+    let streamInfo = forceRefresh ? undefined : streamCache.get(cacheKey);
 
     if (!streamInfo || Date.now() - streamInfo.timestamp > CACHE_TTL) {
       let resolvedUrl: string | null = null;
       let mimeType = 'audio/mp4';
 
-      // 1. Strict 320kbps JioSaavn lookup ONLY when we have an accurate title AND verify artist+title+duration
+      // 1. Strict 320kbps JioSaavn lookup ONLY when we verify artist+title+duration
       if (title) {
-        const queryTerm = effectiveArtist ? `${title} ${effectiveArtist}`.trim() : title;
-        const apis = [
-          `https://saavn-api-one.vercel.app/search/songs?query=${encodeURIComponent(queryTerm)}`,
-          `https://saavn-api-beta.vercel.app/api/search/songs?query=${encodeURIComponent(queryTerm)}`,
-          `https://jiosaavn-api-privatet3.vercel.app/search/songs?query=${encodeURIComponent(queryTerm)}`,
-        ];
+        const queryVariants = buildStreamSearchQueries(title, effectiveArtist);
+        const allowLooseWithoutArtist = !effectiveArtist && !vidId;
 
-        for (const endpoint of apis) {
+        for (const queryTerm of queryVariants) {
           if (resolvedUrl) break;
           try {
-            const resp = await fetch(endpoint, { signal: AbortSignal.timeout(3500) });
+            const endpoint = `https://saavn-api-one.vercel.app/search/songs?query=${encodeURIComponent(queryTerm)}`;
+            const resp = await fetch(endpoint, { signal: AbortSignal.timeout(4000) });
             if (resp.ok) {
               const data: any = await resp.json();
               const results = data.data?.results || data.results;
               if (Array.isArray(results)) {
-                // Only accept a candidate that strictly matches BOTH title & artist (and duration)
-                // If artist is still unknown AND vidId exists, skip loose JioSaavn matches so exact vidId plays via YouTube!
-                const allowLooseWithoutArtist = !effectiveArtist && !vidId;
                 const matchedHit = results.slice(0, 8).find((hit: any) => {
                   if (!hit || !hit.downloadUrl) return false;
                   if (!effectiveArtist && !allowLooseWithoutArtist) {
@@ -619,7 +688,7 @@ app.get('/api/stream', async (req: Request, res: Response) => {
               }
             }
           } catch {
-            // continue next provider
+            // continue next query variant
           }
         }
       }
@@ -646,6 +715,24 @@ app.get('/api/stream', async (req: Request, res: Response) => {
           }
         } catch (ytErr: any) {
           console.warn('YouTube Music decipher notice:', ytErr?.message || ytErr);
+        }
+      }
+
+      // 3. Fallback: @distube/ytdl-core extraction (works cleanly on residential/self-hosted IPs)
+      if (!resolvedUrl && vidId && !vidId.startsWith('online-') && !vidId.startsWith('local-')) {
+        try {
+          const ytdl = getYtdl();
+          const info = await ytdl.getInfo(vidId);
+          const format = chooseFormat(info.formats, {
+            quality: 'highestaudio',
+            filter: (f) => f.hasAudio && !f.hasVideo,
+          });
+          if (format?.url) {
+            resolvedUrl = format.url;
+            mimeType = format.mimeType?.split(';')[0] || 'audio/mp4';
+          }
+        } catch {
+          // ignore if YouTube blocks datacenter IP
         }
       }
 
@@ -701,6 +788,9 @@ app.get('/api/stream', async (req: Request, res: Response) => {
           pump().catch(() => res.end());
           return;
         }
+      } else {
+        // Evict stale upstream URL from cache if CDN rejected it
+        streamCache.delete(cacheKey);
       }
     }
 

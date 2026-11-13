@@ -32,7 +32,10 @@ export const DEFAULT_CACHE_CONFIG: CacheConfig = {
 class OfflineCacheService {
   private dbPromise: Promise<IDBDatabase> | null = null;
   private cachedIds: Set<string> = new Set();
+  private cachingIds: Set<string> = new Set();
+  private inFlightCaches: Map<string, Promise<boolean>> = new Map();
   private listeners: (() => void)[] = [];
+  private cachingListeners: ((ids: Set<string>) => void)[] = [];
 
   constructor() {
     if (typeof window !== 'undefined' && 'indexedDB' in window) {
@@ -69,8 +72,21 @@ class OfflineCacheService {
         }
       };
 
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const db = request.result;
+        db.onclose = () => {
+          this.dbPromise = null;
+        };
+        db.onversionchange = () => {
+          db.close();
+          this.dbPromise = null;
+        };
+        resolve(db);
+      };
+      request.onerror = () => {
+        this.dbPromise = null;
+        reject(request.error);
+      };
     });
 
     return this.dbPromise;
@@ -82,6 +98,23 @@ class OfflineCacheService {
     return () => {
       this.listeners = this.listeners.filter((l) => l !== listener);
     };
+  }
+
+  // Subscribe to active in-flight caching state (spinner updates)
+  subscribeCaching(listener: (ids: Set<string>) => void) {
+    this.cachingListeners.push(listener);
+    return () => {
+      this.cachingListeners = this.cachingListeners.filter((l) => l !== listener);
+    };
+  }
+
+  private notifyCaching() {
+    const snapshot = new Set(this.cachingIds);
+    this.cachingListeners.forEach((l) => l(snapshot));
+  }
+
+  getCachingIdsSnapshot(): Set<string> {
+    return new Set(this.cachingIds);
   }
 
   private notify() {
@@ -106,6 +139,10 @@ class OfflineCacheService {
     return this.cachedIds.has(songId);
   }
 
+  isCachingSync(songId: string): boolean {
+    return this.cachingIds.has(songId);
+  }
+
   async isSongCached(songId: string): Promise<boolean> {
     const db = await this.initDB();
     return new Promise((resolve) => {
@@ -120,8 +157,26 @@ class OfflineCacheService {
     });
   }
 
-  // Save song + audio stream to offline IndexedDB
+  // Save song + audio stream to offline IndexedDB (deduplicated per song ID)
   async cacheSong(song: Song, audioBlob?: Blob): Promise<boolean> {
+    const existingFlight = this.inFlightCaches.get(song.id);
+    if (existingFlight && !audioBlob) {
+      return existingFlight;
+    }
+
+    const run = this._cacheSongInternal(song, audioBlob).finally(() => {
+      this.inFlightCaches.delete(song.id);
+      this.cachingIds.delete(song.id);
+      this.notifyCaching();
+    });
+
+    this.cachingIds.add(song.id);
+    this.notifyCaching();
+    this.inFlightCaches.set(song.id, run);
+    return run;
+  }
+
+  private async _cacheSongInternal(song: Song, audioBlob?: Blob): Promise<boolean> {
     try {
       const db = await this.initDB();
 
@@ -222,7 +277,7 @@ class OfflineCacheService {
     try {
       const db = await this.initDB();
       return new Promise((resolve) => {
-        const tx = db.transaction(STORE_SONGS, 'readwrite');
+        const tx = db.transaction(STORE_SONGS, 'readonly');
         const store = tx.objectStore(STORE_SONGS);
         const req = store.get(songId);
 
@@ -238,10 +293,6 @@ class OfflineCacheService {
             }
             return resolve(null);
           }
-
-          // Update lastAccessedAt without modifying the record's audioBlob
-          record.lastAccessedAt = Date.now();
-          store.put(record);
 
           let audioUrl = '';
           try {

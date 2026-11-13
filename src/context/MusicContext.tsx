@@ -152,11 +152,16 @@ interface MusicContextType {
 
   // Offline Caching & IndexedDB (RiPlay feature)
   cachedSongIds: Set<string>;
+  cachingSongIds: Set<string>;
   cachedTracks: CachedTrackRecord[];
   isSongCached: (songId: string) => boolean;
-  cacheSong: (song: Song, audioBlob?: Blob) => Promise<boolean>;
+  isSongCaching: (songId: string) => boolean;
+  cacheSong: (song: Song, audioBlob?: Blob, silent?: boolean) => Promise<boolean>;
   removeCachedSong: (songId: string) => Promise<boolean>;
   clearOfflineCache: () => Promise<boolean>;
+  batchCacheState: { active: boolean; targetId?: string; total: number; completed: number; failed: number } | null;
+  cacheSongsBatch: (songs: Song[], targetId?: string, label?: string) => Promise<void>;
+  cancelBatchCache: () => void;
   cacheConfig: CacheConfig;
   updateCacheConfig: (config: CacheConfig) => Promise<void>;
   storageEstimate: { totalBytes: number; count: number };
@@ -300,8 +305,19 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   // Offline Cache states (IndexedDB)
   const [cachedSongIds, setCachedSongIds] = useState<Set<string>>(new Set());
+  const [cachingSongIds, setCachingSongIds] = useState<Set<string>>(new Set());
   const [cachedTracks, setCachedTracks] = useState<CachedTrackRecord[]>([]);
   const [cacheConfig, setCacheConfigState] = useState<CacheConfig>(DEFAULT_CACHE_CONFIG);
+  const cacheConfigRef = useRef<CacheConfig>(DEFAULT_CACHE_CONFIG);
+  cacheConfigRef.current = cacheConfig;
+  const [batchCacheState, setBatchCacheState] = useState<{
+    active: boolean;
+    targetId?: string;
+    total: number;
+    completed: number;
+    failed: number;
+  } | null>(null);
+  const batchCancelRef = useRef<boolean>(false);
   const [storageEstimate, setStorageEstimate] = useState<{ totalBytes: number; count: number }>({
     totalBytes: 0,
     count: 0,
@@ -638,9 +654,15 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       setStorageEstimate(est);
     });
 
+    const unsubCaching = offlineCacheService.subscribeCaching((ids) => {
+      if (!isMounted) return;
+      setCachingSongIds(ids);
+    });
+
     return () => {
       isMounted = false;
       unsub();
+      unsubCaching();
     };
   }, []);
 
@@ -1186,7 +1208,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     // Auto-cache real audio stream in background ONLY if enabled, device is online, and song is not already cached
     const isAlreadyCached = !!(cachedData && cachedData.audioUrl);
     const isOnline = typeof navigator === 'undefined' || navigator.onLine;
-    if (cacheConfig.autoCacheOnPlay && !isAlreadyCached && isOnline) {
+    if (cacheConfigRef.current.autoCacheOnPlay && !isAlreadyCached && isOnline) {
       offlineCacheService.cacheSong(song).catch(() => {});
     }
   };
@@ -1573,10 +1595,90 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     return cachedSongIds.has(songId);
   };
 
-  const cacheSong = async (song: Song, audioBlob?: Blob) => {
+  const isSongCaching = (songId: string) => {
+    return cachingSongIds.has(songId);
+  };
+
+  const cacheSong = async (song: Song, audioBlob?: Blob, silent = false) => {
     hapticFeedback();
+    if (typeof navigator !== 'undefined' && !navigator.onLine && !audioBlob) {
+      if (!silent) showToast('You are offline — connect to internet to cache');
+      return false;
+    }
     const ok = await offlineCacheService.cacheSong(song, audioBlob);
+    if (!silent) {
+      if (ok) {
+        showToast(`Saved "${song.title}" for offline playback`);
+      } else {
+        showToast(`Offline audio unavailable for "${song.title}" — try Sync`);
+      }
+    }
     return ok;
+  };
+
+  const cancelBatchCache = () => {
+    hapticFeedback();
+    batchCancelRef.current = true;
+  };
+
+  const cacheSongsBatch = async (songs: Song[], targetId?: string, label = 'playlist') => {
+    hapticFeedback();
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      showToast('You are offline — connect to internet to cache songs');
+      return;
+    }
+    if (!songs || songs.length === 0) return;
+
+    // Deduplicate and skip already cached songs
+    const seen = new Set<string>();
+    const uncached: Song[] = [];
+    for (const s of songs) {
+      if (!s?.id || seen.has(s.id)) continue;
+      seen.add(s.id);
+      const already = offlineCacheService.isCachedSync(s.id) || (await offlineCacheService.isSongCached(s.id));
+      if (!already) uncached.push(s);
+    }
+
+    if (uncached.length === 0) {
+      showToast(`All tracks in ${label} are already cached offline!`);
+      return;
+    }
+
+    batchCancelRef.current = false;
+    let completed = 0;
+    let failed = 0;
+    const total = uncached.length;
+    setBatchCacheState({ active: true, targetId, total, completed: 0, failed: 0 });
+    showToast(`Caching ${total} track${total > 1 ? 's' : ''} from ${label}...`);
+
+    // Process 2 downloads concurrently to stay fast without overwhelming mobile WebKit/IDB
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < uncached.length && !batchCancelRef.current) {
+        const idx = cursor++;
+        const item = uncached[idx];
+        const ok = await offlineCacheService.cacheSong(item).catch(() => false);
+        if (ok) completed++;
+        else failed++;
+        setBatchCacheState({ active: true, targetId, total, completed, failed });
+      }
+    };
+
+    await Promise.all([worker(), worker()]);
+
+    const wasCancelled = batchCancelRef.current;
+    batchCancelRef.current = false;
+    setBatchCacheState(null);
+
+    if (wasCancelled) {
+      showToast(`Stopped caching (${completed} of ${total} saved offline)`);
+    } else if (failed === 0) {
+      showToast(`Cached ${completed} song${completed !== 1 ? 's' : ''} offline!`);
+    } else if (completed > 0) {
+      showToast(`Cached ${completed}/${total} songs (${failed} stream${failed !== 1 ? 's' : ''} unavailable)`);
+    } else {
+      showToast(`No downloadable audio streams found for ${label} — try Sync on individual tracks`);
+    }
   };
 
   const removeCachedSong = async (songId: string) => {
@@ -2080,11 +2182,16 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         hapticFeedback,
         addLocalSongs,
         cachedSongIds,
+        cachingSongIds,
         cachedTracks,
         isSongCached,
+        isSongCaching,
         cacheSong,
         removeCachedSong,
         clearOfflineCache,
+        batchCacheState,
+        cacheSongsBatch,
+        cancelBatchCache,
         cacheConfig,
         updateCacheConfig,
         storageEstimate,

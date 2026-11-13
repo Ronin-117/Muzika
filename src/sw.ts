@@ -19,8 +19,13 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event: FetchEvent) => {
   const url = new URL(event.request.url);
 
-  // Intercept audio stream requests for background and offline Range support
-  if (url.pathname.startsWith('/api/stream')) {
+  // Intercept audio stream playback requests for background and offline Range support,
+  // but bypass SW for metadata lookups (?json=true) and explicit IndexedDB blob downloads (?download=1).
+  if (
+    url.pathname.startsWith('/api/stream') &&
+    url.searchParams.get('json') !== 'true' &&
+    url.searchParams.get('download') !== '1'
+  ) {
     event.respondWith(handleAudioStreamFetch(event));
   }
 });

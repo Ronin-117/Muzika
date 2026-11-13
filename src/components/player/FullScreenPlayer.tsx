@@ -25,6 +25,7 @@ import {
   DownloadCloud,
   CheckCircle2,
   Plus,
+  Loader2,
 } from 'lucide-react';
 import { LyricsView } from './LyricsView';
 import { QueueView } from './QueueView';
@@ -58,6 +59,7 @@ export const FullScreenPlayer: React.FC = () => {
     themeColors,
     hapticFeedback,
     isSongCached,
+    isSongCaching,
     cacheSong,
     removeCachedSong,
     setAddToPlaylistTargetSong,
@@ -258,20 +260,26 @@ export const FullScreenPlayer: React.FC = () => {
             <button
               onClick={() => {
                 hapticFeedback();
+                if (isSongCaching(currentSong.id)) return;
                 if (isSongCached(currentSong.id)) {
                   removeCachedSong(currentSong.id);
                 } else {
                   cacheSong(currentSong);
                 }
               }}
+              disabled={isSongCaching(currentSong.id)}
               className="p-3 rounded-full hover:bg-white/10 transition"
               title={
-                isSongCached(currentSong.id)
+                isSongCaching(currentSong.id)
+                  ? 'Downloading for Offline Listening...'
+                  : isSongCached(currentSong.id)
                   ? 'Cached for Offline (Click to remove)'
                   : 'Download for Offline Listening'
               }
             >
-              {isSongCached(currentSong.id) ? (
+              {isSongCaching(currentSong.id) ? (
+                <Loader2 className="w-6 h-6 animate-spin text-cyan-400" />
+              ) : isSongCached(currentSong.id) ? (
                 <CheckCircle2 className="w-6 h-6 text-emerald-400" />
               ) : (
                 <DownloadCloud className="w-6 h-6 text-white/60 hover:text-white" />

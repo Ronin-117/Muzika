@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useMusic } from '../../context/MusicContext';
 import { MOOD_CATEGORIES } from '../../data/mockCatalog';
-import { Play, Sparkles, Flame, Smartphone, Heart, ChevronRight, CheckCircle2, Loader2, Music, ListPlus, Plus, MoreVertical } from 'lucide-react';
+import { Play, Sparkles, Flame, Smartphone, Heart, ChevronRight, CheckCircle2, Loader2, Music, ListPlus, Plus, MoreVertical, DownloadCloud } from 'lucide-react';
 import { usePWAInstall } from '../../hooks/usePWAInstall';
 import { Song, Artist } from '../../types/music';
 import { OnlineMusicService } from '../../services/onlineMusicService';
@@ -23,6 +23,9 @@ export const HomeScreen: React.FC = () => {
     themeColors,
     hapticFeedback,
     isSongCached,
+    isSongCaching,
+    cacheSong,
+    removeCachedSong,
     likedSongs,
     history,
     cachedTracks,
@@ -307,6 +310,37 @@ export const HomeScreen: React.FC = () => {
                     </div>
 
                     <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => {
+                          hapticFeedback();
+                          if (isSongCaching(song.id)) return;
+                          if (isSongCached(song.id)) {
+                            removeCachedSong(song.id);
+                          } else {
+                            cacheSong(song);
+                          }
+                        }}
+                        disabled={isSongCaching(song.id)}
+                        className={`p-1.5 rounded-full hover:bg-white/10 transition ${
+                          isSongCached(song.id) ? 'text-emerald-400' : 'text-white/40 hover:text-white'
+                        }`}
+                        title={
+                          isSongCaching(song.id)
+                            ? 'Downloading...'
+                            : isSongCached(song.id)
+                            ? 'Cached Offline (Click to remove)'
+                            : 'Save for offline'
+                        }
+                      >
+                        {isSongCaching(song.id) ? (
+                          <Loader2 className="w-4 h-4 animate-spin text-cyan-400" />
+                        ) : isSongCached(song.id) ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                        ) : (
+                          <DownloadCloud className="w-4 h-4" />
+                        )}
+                      </button>
+
                       <button
                         onClick={() => toggleLike(song)}
                         className="p-1.5 rounded-full hover:bg-white/10 transition"

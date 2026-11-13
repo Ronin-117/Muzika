@@ -14,6 +14,8 @@ import {
   ListOrdered,
   Layers,
   MoreVertical,
+  Loader2,
+  X,
 } from 'lucide-react';
 import { SwipeableSongRow } from '../common/SwipeableSongRow';
 
@@ -26,8 +28,12 @@ export const PlaylistDetailModal: React.FC = () => {
     themeColors,
     hapticFeedback,
     isSongCached,
+    isSongCaching,
     cacheSong,
     removeCachedSong,
+    batchCacheState,
+    cacheSongsBatch,
+    cancelBatchCache,
     addPlaylistToQueue,
     setSongOptionsMenuTarget,
   } = useMusic();
@@ -41,6 +47,8 @@ export const PlaylistDetailModal: React.FC = () => {
   const totalMins = Math.floor(totalDuration / 60);
 
   const cachedSongsInPlaylist = selectedPlaylist.songs.filter((s) => isSongCached(s.id));
+  const uncachedCount = selectedPlaylist.songs.length - cachedSongsInPlaylist.length;
+  const isBatchCachingThis = !!(batchCacheState?.active && batchCacheState.targetId === selectedPlaylist.id);
   const displayedSongs = onlyOffline ? cachedSongsInPlaylist : selectedPlaylist.songs;
 
   const handlePlayAll = (shuffle = false, cachedOnly = false) => {
@@ -138,6 +146,36 @@ export const PlaylistDetailModal: React.FC = () => {
               <ListPlus className="w-4 h-4 text-emerald-400" /> + Add to Queue
             </button>
 
+            {selectedPlaylist.songs.length > 0 && (
+              isBatchCachingThis && batchCacheState ? (
+                <button
+                  onClick={cancelBatchCache}
+                  className="px-4 py-2.5 rounded-full bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold text-xs flex items-center gap-1.5 transition active:scale-95 border border-amber-500/30"
+                  title="Tap to stop batch download"
+                >
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>
+                    Caching {batchCacheState.completed + batchCacheState.failed}/{batchCacheState.total}
+                  </span>
+                  <X className="w-3.5 h-3.5 ml-0.5" />
+                </button>
+              ) : uncachedCount > 0 ? (
+                <button
+                  onClick={() => cacheSongsBatch(selectedPlaylist.songs, selectedPlaylist.id, selectedPlaylist.title)}
+                  disabled={!!batchCacheState?.active}
+                  className="px-4 py-2.5 rounded-full bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 font-bold text-xs flex items-center gap-1.5 transition active:scale-95 border border-cyan-500/30 disabled:opacity-40"
+                >
+                  <DownloadCloud className="w-4 h-4" />
+                  <span>Cache All ({uncachedCount})</span>
+                </button>
+              ) : (
+                <div className="px-4 py-2.5 rounded-full bg-emerald-500/15 text-emerald-400 font-bold text-xs flex items-center gap-1.5 border border-emerald-500/30">
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>All Cached ({cachedSongsInPlaylist.length})</span>
+                </div>
+              )
+            )}
+
             {cachedSongsInPlaylist.length > 0 && (
               <button
                 onClick={() => handlePlayAll(false, true)}
@@ -147,6 +185,30 @@ export const PlaylistDetailModal: React.FC = () => {
               </button>
             )}
           </div>
+
+          {/* Live Batch Cache Progress Bar */}
+          {isBatchCachingThis && batchCacheState && (
+            <div className="w-full p-3 rounded-2xl bg-white/5 border border-cyan-500/20 space-y-1.5">
+              <div className="flex items-center justify-between text-[11px] font-semibold">
+                <span className="text-cyan-300 flex items-center gap-1.5">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Downloading offline tracks ({batchCacheState.completed} saved
+                  {batchCacheState.failed > 0 ? `, ${batchCacheState.failed} skipped` : ''})
+                </span>
+                <span className="font-mono text-white/70">
+                  {Math.round(((batchCacheState.completed + batchCacheState.failed) / Math.max(1, batchCacheState.total)) * 100)}%
+                </span>
+              </div>
+              <div className="w-full h-1.5 rounded-full bg-white/10 overflow-hidden">
+                <div
+                  className="h-full bg-cyan-400 transition-all duration-300"
+                  style={{
+                    width: `${Math.min(100, ((batchCacheState.completed + batchCacheState.failed) / Math.max(1, batchCacheState.total)) * 100)}%`,
+                  }}
+                />
+              </div>
+            </div>
+          )}
 
           {/* Add to Queue Options Modal */}
           {showQueueOptions && (
@@ -243,6 +305,7 @@ export const PlaylistDetailModal: React.FC = () => {
           ) : (
             displayedSongs.map((song, idx) => {
               const cached = isSongCached(song.id);
+              const isCaching = isSongCaching(song.id);
               return (
                 <SwipeableSongRow key={`${song.id}-${idx}`} song={song}>
                   <div
@@ -277,14 +340,29 @@ export const PlaylistDetailModal: React.FC = () => {
                       {/* Toggle Cache Button */}
                       <button
                         onClick={() => handleToggleCache(song)}
+                        disabled={isCaching}
                         className={`p-1.5 rounded-lg transition ${
                           cached
                             ? 'text-emerald-400 bg-emerald-500/10'
+                            : isCaching
+                            ? 'text-cyan-400 bg-cyan-500/10'
                             : 'opacity-40 hover:opacity-100 hover:text-white'
                         }`}
-                        title={cached ? 'Available Offline (Click to remove)' : 'Download for offline play'}
+                        title={
+                          isCaching
+                            ? 'Downloading for offline play...'
+                            : cached
+                            ? 'Available Offline (Click to remove)'
+                            : 'Download for offline play'
+                        }
                       >
-                        {cached ? <CheckCircle2 className="w-4 h-4" /> : <DownloadCloud className="w-4 h-4" />}
+                        {isCaching ? (
+                          <Loader2 className="w-4 h-4 animate-spin text-cyan-400" />
+                        ) : cached ? (
+                          <CheckCircle2 className="w-4 h-4" />
+                        ) : (
+                          <DownloadCloud className="w-4 h-4" />
+                        )}
                       </button>
 
                       <button

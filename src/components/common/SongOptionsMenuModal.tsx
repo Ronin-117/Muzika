@@ -114,8 +114,9 @@ export const SongOptionsMenuModal: React.FC = () => {
       showToast(`Removed "${song.title}" from offline storage`);
     } else {
       showToast(`Downloading "${song.title}" for offline playback...`);
+      handleClose();
       await cacheSong(song);
-      showToast(`Cached "${song.title}" offline`);
+      return;
     }
     handleClose();
   };
