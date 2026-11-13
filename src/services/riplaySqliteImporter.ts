@@ -380,6 +380,13 @@ export class RiplaySqliteImporter {
           if (aId && song) {
             if (!artistSongsMap.has(aId)) artistSongsMap.set(aId, []);
             artistSongsMap.get(aId)!.push(song);
+
+            // Backfill missing artist name on song from Artist table
+            const metaArtist = artistMap.get(aId);
+            if (metaArtist && metaArtist.name && (!song.artist || song.artist === 'Unknown Artist')) {
+              song.artist = metaArtist.name;
+              if (!song.artistId) song.artistId = aId;
+            }
           }
         });
       }
@@ -390,6 +397,10 @@ export class RiplaySqliteImporter {
           if (!artistSongsMap.has(song.artistId)) artistSongsMap.set(song.artistId, []);
           if (!artistSongsMap.get(song.artistId)!.some((s) => s.id === song.id)) {
             artistSongsMap.get(song.artistId)!.push(song);
+          }
+          const metaArtist = artistMap.get(song.artistId);
+          if (metaArtist && metaArtist.name && (!song.artist || song.artist === 'Unknown Artist')) {
+            song.artist = metaArtist.name;
           }
         }
       });

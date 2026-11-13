@@ -18,6 +18,7 @@ const STORAGE_KEYS = {
   ENABLE_MULTIPLE_QUEUES: 'muzika_enable_multiple_queues',
   NAMED_QUEUES: 'muzika_named_queues',
   ACTIVE_QUEUE_ID: 'muzika_active_queue_id',
+  SONG_SYNC_OVERRIDES: 'muzika_song_sync_overrides',
 };
 
 export const DEFAULT_EQUALIZER: EqualizerSettings = {
@@ -347,6 +348,36 @@ export class StorageService {
     try {
       localStorage.setItem(STORAGE_KEYS.ACTIVE_QUEUE_ID, id);
     } catch {}
+  }
+
+  static getSongSyncOverrides(): Record<string, Song> {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.SONG_SYNC_OVERRIDES);
+      if (data) return JSON.parse(data);
+    } catch {}
+    return {};
+  }
+
+  static saveSongSyncOverride(originalId: string, syncedSong: Song): void {
+    try {
+      const existing = this.getSongSyncOverrides();
+      existing[originalId] = syncedSong;
+      localStorage.setItem(STORAGE_KEYS.SONG_SYNC_OVERRIDES, JSON.stringify(existing));
+    } catch {}
+  }
+
+  static applySongSyncOverride(song: Song): Song {
+    const overrides = this.getSongSyncOverrides();
+    const override = overrides[song.id];
+    if (!override) return song;
+    return {
+      ...song,
+      ...override,
+      id: song.id,
+      liked: song.liked ?? override.liked,
+      playCount: song.playCount ?? override.playCount,
+      addedAt: song.addedAt ?? override.addedAt,
+    };
   }
 
   // RiPlay Backup & Restore mechanism (Export & Import JSON)

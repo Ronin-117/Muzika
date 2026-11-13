@@ -23,6 +23,7 @@ import { PWAUpdateToast } from './components/common/PWAUpdateToast';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { AddToPlaylistModal } from './components/common/AddToPlaylistModal';
 import { SongOptionsMenuModal } from './components/common/SongOptionsMenuModal';
+import { SyncSongModal } from './components/common/SyncSongModal';
 import { ToastNotification } from './components/common/ToastNotification';
 import { WifiOff } from 'lucide-react';
 
@@ -97,6 +98,7 @@ function MuzikaApp() {
       {/* Global Quick Action Modals & Toasts */}
       <AddToPlaylistModal />
       <SongOptionsMenuModal />
+      <SyncSongModal />
       <ToastNotification />
 
       {/* Persistent YouTube Iframe Embed Container */}

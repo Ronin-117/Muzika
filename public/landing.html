@@ -1,0 +1,831 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Muzika — Free Offline Music Player & PWA Streaming App</title>
+  <meta name="description" content="Experience high-fidelity music streaming, true offline downloads, multi-queue playback, and RiPlay database compatibility with zero subscriptions, zero ads, and no sign-up.">
+  <meta name="theme-color" content="#064e3b">
+
+  <!-- OpenGraph Social Cards -->
+  <meta property="og:title" content="Muzika — Free Offline Music Player & PWA Streaming App">
+  <meta property="og:description" content="No subscriptions. No sign-up. True offline IndexedDB storage, multi-queue playback, 5-band DSP equalizer, and RiPlay database import.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://my-muzika.duckdns.org/">
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#ecfdf5',
+              100: '#d1fae5',
+              200: '#a7f3d0',
+              300: '#6ee7b7',
+              400: '#34d399',
+              500: '#10b981',
+              600: '#059669',
+              700: '#047857',
+              800: '#065f46',
+              900: '#064e3b',
+              950: '#022c22',
+            }
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+            mono: ['JetBrains Mono', 'Menlo', 'Monaco', 'Courier New', 'monospace']
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    /* Custom Smooth Glassmorphism & Glow Effects */
+    body {
+      background-color: #030712;
+      color: #f3f4f6;
+      font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    }
+    .glass-card {
+      background: rgba(17, 24, 39, 0.7);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .glass-card-hover {
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .glass-card-hover:hover {
+      background: rgba(31, 41, 55, 0.85);
+      border-color: rgba(16, 185, 129, 0.35);
+      transform: translateY(-2px);
+    }
+    .glow-emerald {
+      box-shadow: 0 0 35px -5px rgba(16, 185, 129, 0.3);
+    }
+    .glow-emerald-lg {
+      box-shadow: 0 0 60px -10px rgba(16, 185, 129, 0.25);
+    }
+    .text-gradient {
+      background: linear-gradient(135deg, #ffffff 30%, #a7f3d0 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .text-gradient-emerald {
+      background: linear-gradient(135deg, #34d399 0%, #10b981 50%, #059669 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    /* Hide scrollbar for tabs */
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col selection:bg-brand-500 selection:text-black">
+
+  <!-- Top Announcement Bar -->
+  <aside aria-label="Announcement" class="bg-gradient-to-r from-brand-950 via-brand-900 to-gray-950 border-b border-brand-800/40 text-xs py-2 px-4 text-center text-brand-200">
+    <div class="max-w-7xl mx-auto flex items-center justify-center gap-2 flex-wrap">
+      <span class="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+      <span><strong>Muzika v2.7.2</strong> is live with True Offline Caching, Multi-Queue Management, and RiPlay Import.</span>
+      <a href="https://my-muzika.duckdns.org/" class="font-bold underline hover:text-white transition ml-1">Launch Web App &rarr;</a>
+    </div>
+  </aside>
+
+  <!-- Navigation -->
+  <header class="sticky top-0 z-50 bg-gray-950/80 backdrop-blur-xl border-b border-white/5">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <a href="#" class="flex items-center gap-3 group">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-brand-600 to-emerald-400 flex items-center justify-center text-black font-black text-xl shadow-lg shadow-brand-500/20 group-hover:scale-105 transition">
+          <svg class="w-6 h-6 text-gray-950" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+          </svg>
+        </div>
+        <div>
+          <span class="font-black text-xl tracking-tight text-white block leading-none">Muzika</span>
+          <span class="text-[10px] font-mono text-brand-400 block tracking-wider uppercase mt-0.5">Freedom to Listen</span>
+        </div>
+      </a>
+
+      <!-- Desktop Links -->
+      <nav class="hidden md:flex items-center gap-8 text-sm font-medium text-gray-300">
+        <a href="#features" class="hover:text-emerald-400 transition">Features</a>
+        <a href="#install" class="hover:text-emerald-400 transition">How to Install</a>
+        <a href="#riplay" class="hover:text-emerald-400 transition">RiPlay Sync</a>
+        <a href="#comparison" class="hover:text-emerald-400 transition">Why Muzika</a>
+        <a href="https://github.com/Ronin-117/Muzika" target="_blank" rel="noopener noreferrer" class="hover:text-white transition flex items-center gap-1.5">
+          <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
+          <span>GitHub</span>
+        </a>
+      </nav>
+
+      <!-- Action Buttons -->
+      <div class="flex items-center gap-3">
+        <a href="https://my-muzika.duckdns.org/" class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-brand-500 to-emerald-400 text-gray-950 font-bold text-sm shadow-lg shadow-brand-500/25 hover:shadow-brand-500/40 hover:scale-[1.02] active:scale-[0.98] transition flex items-center gap-2">
+          <span>Open App</span>
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <main class="flex-grow">
+    <!-- Hero Section -->
+    <section class="relative pt-16 pb-24 overflow-hidden">
+      <!-- Glow background circles -->
+      <div class="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-brand-500/10 rounded-full blur-[140px] pointer-events-none -z-10"></div>
+      <div class="absolute top-1/3 left-1/4 w-[350px] h-[350px] bg-cyan-500/10 rounded-full blur-[120px] pointer-events-none -z-10"></div>
+
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+        <!-- Badges line -->
+        <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-xs text-gray-300 mb-8 backdrop-blur-md">
+          <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+          <span>Zero Subscriptions</span>
+          <span class="text-white/20">·</span>
+          <span>No Sign-up</span>
+          <span class="text-white/20">·</span>
+          <span>True Offline Playback</span>
+        </div>
+
+        <h1 class="text-4xl sm:text-6xl lg:text-7xl font-black tracking-tight leading-[1.08] max-w-4xl mx-auto mb-6">
+          Your Music. <br class="hidden sm:inline" />
+          <span class="text-gradient">Truly Yours, Anywhere.</span>
+        </h1>
+
+        <p class="text-base sm:text-xl text-gray-400 max-w-2xl mx-auto mb-10 leading-relaxed">
+          Muzika is a lightning-fast, privacy-first Progressive Web App. Stream unlimited songs in 320kbps, download full audio directly into device storage for offline playback, manage multiple queue states, and import your entire RiPlay library with one click.
+        </p>
+
+        <!-- CTAs -->
+        <div class="flex flex-col sm:flex-row items-center justify-center gap-4 max-w-md mx-auto mb-12">
+          <a href="https://my-muzika.duckdns.org/" class="w-full sm:w-auto px-8 py-4 rounded-2xl bg-emerald-400 hover:bg-emerald-300 text-gray-950 font-black text-base shadow-xl shadow-brand-500/25 hover:shadow-brand-500/40 hover:-translate-y-0.5 active:translate-y-0 transition flex items-center justify-center gap-2">
+            <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+            <span>Launch Muzika Web App</span>
+          </a>
+
+          <a href="#install" class="w-full sm:w-auto px-6 py-4 rounded-2xl bg-white/5 hover:bg-white/10 text-white font-semibold text-base border border-white/10 transition flex items-center justify-center gap-2">
+            <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+            <span>Install on iOS / Android</span>
+          </a>
+        </div>
+
+        <!-- Quick Copy App Link Widget -->
+        <div class="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-gray-900/80 border border-white/10 text-xs text-gray-400 mb-16 shadow-inner">
+          <span class="font-mono text-gray-300">https://my-muzika.duckdns.org/</span>
+          <button id="copyBtn" onclick="copyLink()" class="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white font-medium text-[11px] transition flex items-center gap-1">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+            <span id="copyText">Copy Link</span>
+          </button>
+        </div>
+
+        <!-- Mockup Visual Container -->
+        <div class="relative max-w-5xl mx-auto">
+          <div class="glass-card rounded-3xl p-3 sm:p-5 border border-white/10 shadow-2xl glow-emerald-lg">
+            <!-- App Preview UI Mockup -->
+            <div class="bg-gray-950 rounded-2xl p-4 sm:p-6 overflow-hidden border border-white/5 text-left">
+              <!-- Mock Header -->
+              <div class="flex items-center justify-between pb-4 border-b border-white/10 mb-6">
+                <div class="flex items-center gap-3">
+                  <div class="w-3 h-3 rounded-full bg-rose-500"></div>
+                  <div class="w-3 h-3 rounded-full bg-amber-500"></div>
+                  <div class="w-3 h-3 rounded-full bg-emerald-500"></div>
+                  <span class="text-xs font-mono text-gray-500 ml-2">Muzika PWA Player • High-Fidelity Audio</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">ONLINE &amp; OFFLINE READY</span>
+                  <span class="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-brand-500/20 text-brand-300 border border-brand-500/30">5-BAND DSP EQ</span>
+                </div>
+              </div>
+
+              <!-- Main Mockup Grid -->
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <!-- Left: Now Playing Card -->
+                <div class="bg-white/[0.03] rounded-2xl p-4 border border-white/5 space-y-4">
+                  <div class="aspect-square rounded-xl overflow-hidden relative group bg-gradient-to-br from-brand-900 to-gray-900 flex items-center justify-center shadow-lg">
+                    <svg class="w-16 h-16 text-emerald-400 opacity-60" fill="currentColor" viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+                    <div class="absolute bottom-2 left-2 right-2 px-2.5 py-1 rounded-lg bg-black/70 backdrop-blur-md text-[11px] font-medium text-emerald-300 flex items-center justify-between">
+                      <span>Full 320kbps Audio</span>
+                      <span class="text-[9px] font-mono px-1 bg-emerald-500/30 rounded">CACHED</span>
+                    </div>
+                  </div>
+                  <div>
+                    <h3 class="font-bold text-white text-base truncate">Midnight Horizon</h3>
+                    <p class="text-xs text-gray-400 truncate">Audiophile Studio Remaster</p>
+                  </div>
+                  <!-- Progress Bar Mock -->
+                  <div class="space-y-1">
+                    <div class="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
+                      <div class="w-2/3 h-full bg-emerald-400 rounded-full"></div>
+                    </div>
+                    <div class="flex justify-between text-[10px] font-mono text-gray-500">
+                      <span>2:14</span>
+                      <span>3:48</span>
+                    </div>
+                  </div>
+                  <!-- Mini Control Bar -->
+                  <div class="flex items-center justify-center gap-6 pt-1 text-gray-300">
+                    <svg class="w-4 h-4 cursor-pointer hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"/></svg>
+                    <div class="w-10 h-10 rounded-full bg-emerald-400 text-black flex items-center justify-center shadow-md shadow-brand-500/30 cursor-pointer">
+                      <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                    </div>
+                    <svg class="w-4 h-4 cursor-pointer hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7"/></svg>
+                  </div>
+                </div>
+
+                <!-- Center: Multi-Queue System Mock -->
+                <div class="bg-white/[0.03] rounded-2xl p-4 border border-white/5 space-y-3">
+                  <div class="flex items-center justify-between">
+                    <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">Multi-Queue Engine</span>
+                    <span class="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">3 Active Queues</span>
+                  </div>
+                  <!-- Queue Selector Pill Row -->
+                  <div class="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+                    <span class="px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-400 text-black shadow-sm">Workout (14)</span>
+                    <span class="px-2.5 py-1 rounded-lg text-xs font-medium bg-white/5 text-gray-400 hover:text-white">Chill Vibe (28)</span>
+                    <span class="px-2.5 py-1 rounded-lg text-xs font-medium bg-white/5 text-gray-400 hover:text-white">Road Trip</span>
+                  </div>
+                  <!-- Queue Items Mock -->
+                  <div class="space-y-2 pt-1 text-xs">
+                    <div class="p-2 rounded-xl bg-white/10 flex items-center justify-between">
+                      <div class="truncate flex items-center gap-2">
+                        <span class="text-emerald-400 font-bold">1</span>
+                        <span class="text-white font-medium truncate">Energy Surge</span>
+                      </div>
+                      <span class="text-[10px] text-gray-400 font-mono">3:20</span>
+                    </div>
+                    <div class="p-2 rounded-xl bg-white/[0.04] flex items-center justify-between">
+                      <div class="truncate flex items-center gap-2">
+                        <span class="text-gray-500">2</span>
+                        <span class="text-gray-300 truncate">Adrenaline Rush</span>
+                      </div>
+                      <span class="text-[10px] text-gray-500 font-mono">4:12</span>
+                    </div>
+                    <div class="p-2 rounded-xl bg-white/[0.04] flex items-center justify-between">
+                      <div class="truncate flex items-center gap-2">
+                        <span class="text-gray-500">3</span>
+                        <span class="text-gray-300 truncate">Peak Performance</span>
+                      </div>
+                      <span class="text-[10px] text-gray-500 font-mono">2:55</span>
+                    </div>
+                  </div>
+                  <p class="text-[11px] text-gray-500 italic pt-1">Swipe left-to-right on any song to add directly to your current queue.</p>
+                </div>
+
+                <!-- Right: 5-Band DSP Equalizer Mock -->
+                <div class="bg-white/[0.03] rounded-2xl p-4 border border-white/5 space-y-3">
+                  <div class="flex items-center justify-between">
+                    <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">Pro DSP Equalizer</span>
+                    <span class="text-[10px] font-mono text-emerald-400 font-bold">ACTIVE</span>
+                  </div>
+                  <!-- Preset Badges -->
+                  <div class="flex gap-1 overflow-x-auto text-[10px] font-bold">
+                    <span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">Bass Boost</span>
+                    <span class="px-2 py-0.5 rounded bg-white/5 text-gray-400">Electronic</span>
+                    <span class="px-2 py-0.5 rounded bg-white/5 text-gray-400">Rock</span>
+                  </div>
+                  <!-- EQ Vertical Bars Visualization -->
+                  <div class="grid grid-cols-5 gap-1.5 pt-2 text-center">
+                    <div class="flex flex-col items-center gap-1">
+                      <span class="text-[9px] font-mono text-emerald-400 font-bold">+8dB</span>
+                      <div class="w-full h-20 bg-white/5 rounded-lg flex flex-col justify-end p-0.5">
+                        <div class="w-full h-[80%] bg-emerald-400 rounded"></div>
+                      </div>
+                      <span class="text-[9px] font-mono text-gray-400">60Hz</span>
+                    </div>
+                    <div class="flex flex-col items-center gap-1">
+                      <span class="text-[9px] font-mono text-emerald-400 font-bold">+5dB</span>
+                      <div class="w-full h-20 bg-white/5 rounded-lg flex flex-col justify-end p-0.5">
+                        <div class="w-full h-[65%] bg-emerald-400 rounded"></div>
+                      </div>
+                      <span class="text-[9px] font-mono text-gray-400">230Hz</span>
+                    </div>
+                    <div class="flex flex-col items-center gap-1">
+                      <span class="text-[9px] font-mono text-gray-400">0dB</span>
+                      <div class="w-full h-20 bg-white/5 rounded-lg flex flex-col justify-end p-0.5">
+                        <div class="w-full h-[50%] bg-white/30 rounded"></div>
+                      </div>
+                      <span class="text-[9px] font-mono text-gray-400">910Hz</span>
+                    </div>
+                    <div class="flex flex-col items-center gap-1">
+                      <span class="text-[9px] font-mono text-emerald-400 font-bold">+3dB</span>
+                      <div class="w-full h-20 bg-white/5 rounded-lg flex flex-col justify-end p-0.5">
+                        <div class="w-full h-[60%] bg-emerald-400 rounded"></div>
+                      </div>
+                      <span class="text-[9px] font-mono text-gray-400">3.6k</span>
+                    </div>
+                    <div class="flex flex-col items-center gap-1">
+                      <span class="text-[9px] font-mono text-emerald-400 font-bold">+6dB</span>
+                      <div class="w-full h-20 bg-white/5 rounded-lg flex flex-col justify-end p-0.5">
+                        <div class="w-full h-[72%] bg-emerald-400 rounded"></div>
+                      </div>
+                      <span class="text-[9px] font-mono text-gray-400">14k</span>
+                    </div>
+                  </div>
+                  <div class="flex justify-between items-center text-[10px] text-gray-400 pt-1 border-t border-white/5">
+                    <span>Dynamic Bass Boost: 75%</span>
+                    <span class="text-emerald-400 font-bold">Limiter Safe</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Key Benefits & Core Pillars -->
+    <section id="features" class="py-20 border-t border-white/5 relative">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="text-center max-w-3xl mx-auto mb-16">
+          <span class="text-xs font-mono font-bold uppercase tracking-wider text-emerald-400">Uncompromising Freedom</span>
+          <h2 class="text-3xl sm:text-5xl font-black tracking-tight text-white mt-2 mb-4">
+            Everything You Need.<br />None of the Subscriptions.
+          </h2>
+          <p class="text-gray-400 text-base sm:text-lg">
+            Say goodbye to monthly recurring charges, locked offline music, intrusive corporate algorithms, and account walls. Muzika gives you true digital autonomy over your listening.
+          </p>
+        </div>
+
+        <!-- 6 Core Feature Cards Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+
+          <!-- 1. Offline Music -->
+          <div class="glass-card glass-card-hover rounded-3xl p-6 sm:p-8 flex flex-col justify-between">
+            <div>
+              <div class="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 mb-6">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10"/></svg>
+              </div>
+              <h3 class="text-xl font-bold text-white mb-2">True Offline Caching</h3>
+              <p class="text-sm text-gray-400 leading-relaxed">
+                Downloaded songs are stored in your device's native IndexedDB as real 320kbps audio files. Listen without Wi-Fi or cellular data on flights, road trips, or rural commutes with zero playback cuts.
+              </p>
+            </div>
+            <div class="pt-6 border-t border-white/5 mt-6 text-xs text-emerald-400 font-semibold flex items-center gap-1.5">
+              <span>Export songs directly to MP3 files anytime</span>
+            </div>
+          </div>
+
+          <!-- 2. No Subscriptions or Accounts -->
+          <div class="glass-card glass-card-hover rounded-3xl p-6 sm:p-8 flex flex-col justify-between">
+            <div>
+              <div class="w-12 h-12 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 mb-6">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+              </div>
+              <h3 class="text-xl font-bold text-white mb-2">Zero Subscriptions &amp; No Login</h3>
+              <p class="text-sm text-gray-400 leading-relaxed">
+                No credit cards, no monthly $11.99 bills, and no mandatory Google or email logins. Simply open the app, search or play, and start enjoying your tracks immediately with complete privacy.
+              </p>
+            </div>
+            <div class="pt-6 border-t border-white/5 mt-6 text-xs text-cyan-400 font-semibold flex items-center gap-1.5">
+              <span>Zero tracking · Zero telemetry · 100% Client-Side</span>
+            </div>
+          </div>
+
+          <!-- 3. RiPlay DB Compatibility -->
+          <div class="glass-card glass-card-hover rounded-3xl p-6 sm:p-8 flex flex-col justify-between">
+            <div>
+              <div class="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 mb-6">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/></svg>
+              </div>
+              <h3 class="text-xl font-bold text-white mb-2">RiPlay Database Compatible</h3>
+              <p class="text-sm text-gray-400 leading-relaxed">
+                Coming from the Android RiPlay app? Seamlessly import your SQLite database (<code class="text-amber-300 font-mono text-xs">riplay.db</code>) with deduplication support to restore all your custom playlists, artists, and liked songs in seconds.
+              </p>
+            </div>
+            <div class="pt-6 border-t border-white/5 mt-6 text-xs text-amber-400 font-semibold flex items-center gap-1.5">
+              <span>Instant SQLite parser with WebAssembly support</span>
+            </div>
+          </div>
+
+          <!-- 4. Multiple Queues System -->
+          <div class="glass-card glass-card-hover rounded-3xl p-6 sm:p-8 flex flex-col justify-between">
+            <div>
+              <div class="w-12 h-12 rounded-2xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400 mb-6">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+              </div>
+              <h3 class="text-xl font-bold text-white mb-2">Dedicated Multiple Queues</h3>
+              <p class="text-sm text-gray-400 leading-relaxed">
+                Create independent named queues for each of your listening sessions (e.g. <em>Workout</em>, <em>Study Focus</em>, <em>Road Trip</em>). Switch between queues seamlessly without erasing your listening queue history.
+              </p>
+            </div>
+            <div class="pt-6 border-t border-white/5 mt-6 text-xs text-purple-400 font-semibold flex items-center gap-1.5">
+              <span>Swipe-to-queue on any song anywhere in the app</span>
+            </div>
+          </div>
+
+          <!-- 5. 5-Band Parametric Equalizer -->
+          <div class="glass-card glass-card-hover rounded-3xl p-6 sm:p-8 flex flex-col justify-between">
+            <div>
+              <div class="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 mb-6">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg>
+              </div>
+              <h3 class="text-xl font-bold text-white mb-2">Pro 5-Band DSP Equalizer</h3>
+              <p class="text-sm text-gray-400 leading-relaxed">
+                Shape your sound with high-precision Web Audio API filters covering 60Hz, 230Hz, 910Hz, 3.6kHz, and 14kHz. Includes dynamic bass boost (+15dB), master preamp gain, and automatic soft limiting.
+              </p>
+            </div>
+            <div class="pt-6 border-t border-white/5 mt-6 text-xs text-emerald-400 font-semibold flex items-center gap-1.5">
+              <span>Audiophile sound profiles: Flat, Rock, Electronic, Vocal</span>
+            </div>
+          </div>
+
+          <!-- 6. LRCLIB Synced Lyrics & Sleep Timer -->
+          <div class="glass-card glass-card-hover rounded-3xl p-6 sm:p-8 flex flex-col justify-between">
+            <div>
+              <div class="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400 mb-6">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
+              </div>
+              <h3 class="text-xl font-bold text-white mb-2">Synced Lyrics &amp; Background Audio</h3>
+              <p class="text-sm text-gray-400 leading-relaxed">
+                Sing along with millisecond-accurate timestamped scrolling lyrics powered by the LRCLIB open database. Features lock-screen media notification controls, sleep timer, and screen-off battery preservation.
+              </p>
+            </div>
+            <div class="pt-6 border-t border-white/5 mt-6 text-xs text-rose-400 font-semibold flex items-center gap-1.5">
+              <span>Native MediaSession &amp; Android AudioTrack lock screen</span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- Installation Instructions Section (iOS, Android, Desktop) -->
+    <section id="install" class="py-20 bg-gray-950 border-t border-white/5 relative">
+      <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="text-center max-w-3xl mx-auto mb-12">
+          <span class="text-xs font-mono font-bold uppercase tracking-wider text-emerald-400">PWA Native Installation</span>
+          <h2 class="text-3xl sm:text-5xl font-black tracking-tight text-white mt-2 mb-4">
+            Install Muzika on Any Device
+          </h2>
+          <p class="text-gray-400 text-base sm:text-lg">
+            Muzika is a Progressive Web App (PWA). It doesn't require downloading through crowded app stores. Follow the simple steps below to add it directly to your home screen with its custom icon.
+          </p>
+        </div>
+
+        <!-- Segmented Device Selector Tabs -->
+        <div class="flex justify-center mb-10">
+          <div class="p-1.5 rounded-2xl bg-white/5 border border-white/10 flex gap-2">
+            <button id="tab-ios" onclick="switchInstallTab('ios')" class="px-5 py-2.5 rounded-xl font-bold text-sm transition flex items-center gap-2 bg-emerald-400 text-black shadow-md">
+              <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.37c.62-.75 1.04-1.8 0.92-2.85-.9.04-1.99.6-2.61 1.34-.55.63-1.03 1.68-.9 2.7.99.08 2.02-.49 2.59-1.19z"/></svg>
+              <span>iPhone &amp; iPad (iOS)</span>
+            </button>
+            <button id="tab-android" onclick="switchInstallTab('android')" class="px-5 py-2.5 rounded-xl font-bold text-sm transition flex items-center gap-2 text-gray-400 hover:text-white">
+              <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M17.523 15.3414c-.5511 0-.9993-.4486-.9993-1.0003 0-.5517.4482-1.0003.9993-1.0003.5512 0 .9994.4486.9994 1.0003 0 .5517-.4482 1.0003-.9994 1.0003m-11.046 0c-.5511 0-.9993-.4486-.9993-1.0003 0-.5517.4482-1.0003.9993-1.0003.5512 0 .9994.4486.9994 1.0003 0 .5517-.4482 1.0003-.9994 1.0003m11.4045-6.02l1.9973-3.4592a.416.416 0 00-.1521-.5676.416.416 0 00-.5676.1521l-2.0223 3.503C15.5902 8.4116 13.8533 8.1 12 8.1c-1.8533 0-3.5902.3116-5.1368.8497L4.8409 5.4467a.4161.4161 0 00-.5677-.1521.4157.4157 0 00-.1521.5676l1.9973 3.4592C2.6889 11.1867.3432 14.6589 0 18.761h24c-.3432-4.1021-2.6889-7.5743-6.1185-9.4396"/></svg>
+              <span>Android</span>
+            </button>
+            <button id="tab-desktop" onclick="switchInstallTab('desktop')" class="px-5 py-2.5 rounded-xl font-bold text-sm transition flex items-center gap-2 text-gray-400 hover:text-white">
+              <svg class="w-4 h-4 fill-none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+              <span>PC / Mac / Linux</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- iOS Instructions Panel -->
+        <div id="content-ios" class="glass-card rounded-3xl p-6 sm:p-10 border border-brand-500/20">
+          <div class="flex items-center gap-3 mb-6">
+            <span class="px-3 py-1 rounded-lg text-xs font-bold font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">IOS SAFARI STEP-BY-STEP</span>
+            <span class="text-xs text-gray-400">Takes less than 15 seconds</span>
+          </div>
+          <ol class="space-y-6 text-gray-300">
+            <li class="flex items-start gap-4">
+              <div class="w-8 h-8 rounded-full bg-emerald-400 text-black font-black flex items-center justify-center shrink-0 text-sm">1</div>
+              <div>
+                <p class="font-bold text-white text-base">Open in Safari</p>
+                <p class="text-sm text-gray-400 mt-0.5">Navigate to <a href="https://my-muzika.duckdns.org/" class="text-emerald-400 underline font-mono">https://my-muzika.duckdns.org/</a> inside Apple Safari on your iPhone or iPad.</p>
+              </div>
+            </li>
+            <li class="flex items-start gap-4">
+              <div class="w-8 h-8 rounded-full bg-emerald-400 text-black font-black flex items-center justify-center shrink-0 text-sm">2</div>
+              <div>
+                <p class="font-bold text-white text-base">Tap the Safari Share Button</p>
+                <p class="text-sm text-gray-400 mt-0.5">At the bottom toolbar of Safari, tap the <strong>Share</strong> icon (the square box with an upward-pointing arrow).</p>
+              </div>
+            </li>
+            <li class="flex items-start gap-4">
+              <div class="w-8 h-8 rounded-full bg-emerald-400 text-black font-black flex items-center justify-center shrink-0 text-sm">3</div>
+              <div>
+                <p class="font-bold text-white text-base">Select "Add to Home Screen"</p>
+                <p class="text-sm text-gray-400 mt-0.5">Scroll down the sharing sheet and tap <strong>Add to Home Screen</strong>.</p>
+              </div>
+            </li>
+            <li class="flex items-start gap-4">
+              <div class="w-8 h-8 rounded-full bg-emerald-400 text-black font-black flex items-center justify-center shrink-0 text-sm">4</div>
+              <div>
+                <p class="font-bold text-white text-base">Verify "Open as Web App" &amp; Tap Add</p>
+                <p class="text-sm text-gray-400 mt-0.5">In iOS 17+, make sure the <strong>Open as Web App</strong> toggle is enabled so Muzika uses its standalone icon, custom splash screen, and full native screen estate. Tap <strong>Add</strong> in the top-right corner.</p>
+              </div>
+            </li>
+          </ol>
+          <div class="mt-8 p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-300 flex items-center gap-2">
+            <svg class="w-4 h-4 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+            <span>You're all set! Muzika will now appear right on your home screen with background audio and lock screen widget support.</span>
+          </div>
+        </div>
+
+        <!-- Android Instructions Panel -->
+        <div id="content-android" class="glass-card rounded-3xl p-6 sm:p-10 border border-brand-500/20 hidden">
+          <div class="flex items-center gap-3 mb-6">
+            <span class="px-3 py-1 rounded-lg text-xs font-bold font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">ANDROID CHROME / BRAVE</span>
+            <span class="text-xs text-gray-400">One-tap native APK-like installation</span>
+          </div>
+          <ol class="space-y-6 text-gray-300">
+            <li class="flex items-start gap-4">
+              <div class="w-8 h-8 rounded-full bg-emerald-400 text-black font-black flex items-center justify-center shrink-0 text-sm">1</div>
+              <div>
+                <p class="font-bold text-white text-base">Open in Chrome or Brave</p>
+                <p class="text-sm text-gray-400 mt-0.5">Visit <a href="https://my-muzika.duckdns.org/" class="text-emerald-400 underline font-mono">https://my-muzika.duckdns.org/</a>.</p>
+              </div>
+            </li>
+            <li class="flex items-start gap-4">
+              <div class="w-8 h-8 rounded-full bg-emerald-400 text-black font-black flex items-center justify-center shrink-0 text-sm">2</div>
+              <div>
+                <p class="font-bold text-white text-base">Tap "Install" Banner or Menu (⋮)</p>
+                <p class="text-sm text-gray-400 mt-0.5">A prompt will automatically appear at the bottom asking to <strong>Add Muzika to Home screen</strong>. Alternatively, tap the 3 dots in the top-right corner of Chrome and select <strong>Install app</strong>.</p>
+              </div>
+            </li>
+            <li class="flex items-start gap-4">
+              <div class="w-8 h-8 rounded-full bg-emerald-400 text-black font-black flex items-center justify-center shrink-0 text-sm">3</div>
+              <div>
+                <p class="font-bold text-white text-base">Confirm Installation</p>
+                <p class="text-sm text-gray-400 mt-0.5">Tap <strong>Install</strong>. Muzika will install as a native standalone PWA inside your app drawer with notification center and Bluetooth car media controls.</p>
+              </div>
+            </li>
+          </ol>
+        </div>
+
+        <!-- Desktop Instructions Panel -->
+        <div id="content-desktop" class="glass-card rounded-3xl p-6 sm:p-10 border border-brand-500/20 hidden">
+          <div class="flex items-center gap-3 mb-6">
+            <span class="px-3 py-1 rounded-lg text-xs font-bold font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">WINDOWS / MAC / LINUX</span>
+            <span class="text-xs text-gray-400">Desktop window with media keys</span>
+          </div>
+          <ol class="space-y-6 text-gray-300">
+            <li class="flex items-start gap-4">
+              <div class="w-8 h-8 rounded-full bg-emerald-400 text-black font-black flex items-center justify-center shrink-0 text-sm">1</div>
+              <div>
+                <p class="font-bold text-white text-base">Open in Chrome, Edge, or Brave</p>
+                <p class="text-sm text-gray-400 mt-0.5">Visit <a href="https://my-muzika.duckdns.org/" class="text-emerald-400 underline font-mono">https://my-muzika.duckdns.org/</a>.</p>
+              </div>
+            </li>
+            <li class="flex items-start gap-4">
+              <div class="w-8 h-8 rounded-full bg-emerald-400 text-black font-black flex items-center justify-center shrink-0 text-sm">2</div>
+              <div>
+                <p class="font-bold text-white text-base">Click the Install Icon in the Address Bar</p>
+                <p class="text-sm text-gray-400 mt-0.5">Look at the right side of the address bar for the small computer/download icon labelled <strong>Install Muzika</strong>.</p>
+              </div>
+            </li>
+            <li class="flex items-start gap-4">
+              <div class="w-8 h-8 rounded-full bg-emerald-400 text-black font-black flex items-center justify-center shrink-0 text-sm">3</div>
+              <div>
+                <p class="font-bold text-white text-base">Launch from Desktop or Dock</p>
+                <p class="text-sm text-gray-400 mt-0.5">Muzika opens in its own borderless window. Keyboard play/pause media keys work seamlessly.</p>
+              </div>
+            </li>
+          </ol>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- RiPlay Migration Callout Section -->
+    <section id="riplay" class="py-20 relative border-t border-white/5">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="glass-card rounded-3xl p-8 sm:p-12 border border-brand-500/25 relative overflow-hidden">
+          <div class="absolute -right-20 -bottom-20 w-80 h-80 bg-brand-500/10 rounded-full blur-3xl pointer-events-none"></div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
+            <div>
+              <span class="text-xs font-mono font-bold uppercase tracking-wider text-emerald-400">Seamless Transition</span>
+              <h2 class="text-2xl sm:text-4xl font-black text-white mt-2 mb-4">
+                Migrate Your RiPlay Library in Seconds
+              </h2>
+              <p class="text-gray-300 text-sm sm:text-base leading-relaxed mb-6">
+                Are you an avid user of RiPlay by fast4x? Don't lose your playlists and favorited songs. Muzika includes an embedded WebAssembly SQLite database engine that reads your exported <code class="text-emerald-400 font-mono text-xs bg-black/40 px-2 py-0.5 rounded">.db</code> file directly on your device.
+              </p>
+              <ul class="space-y-3 text-sm text-gray-300 mb-8">
+                <li class="flex items-center gap-2.5">
+                  <svg class="w-5 h-5 text-emerald-400 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+                  <span>Imports all custom playlists with original song orders</span>
+                </li>
+                <li class="flex items-center gap-2.5">
+                  <svg class="w-5 h-5 text-emerald-400 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+                  <span>Smart deduplication prevents redundant songs if you re-import</span>
+                </li>
+                <li class="flex items-center gap-2.5">
+                  <svg class="w-5 h-5 text-emerald-400 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+                  <span>Zero data leaves your phone: 100% processed locally in your browser</span>
+                </li>
+              </ul>
+              <a href="https://my-muzika.duckdns.org/" class="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-sm transition">
+                <span>Go to Settings &rarr; Import RiPlay Database</span>
+              </a>
+            </div>
+
+            <div class="bg-gray-950/80 rounded-2xl p-6 border border-white/10 font-mono text-xs space-y-3">
+              <div class="text-gray-500 flex items-center justify-between pb-2 border-b border-white/5">
+                <span>RiPlay SQLite Engine Output</span>
+                <span class="text-emerald-400">STATUS: OK</span>
+              </div>
+              <p class="text-gray-400"><span class="text-emerald-400">&gt;</span> Reading database: <span class="text-white">riplay_backup.db</span></p>
+              <p class="text-gray-400"><span class="text-emerald-400">&gt;</span> Extracted <span class="text-emerald-400 font-bold">14 Playlists</span> and <span class="text-emerald-400 font-bold">842 Songs</span></p>
+              <p class="text-gray-400"><span class="text-emerald-400">&gt;</span> Matched Artists: <span class="text-white">Daft Punk, The Weeknd, Arctic Monkeys</span></p>
+              <p class="text-emerald-300 font-bold pt-2 border-t border-white/5">&gt; Library successfully synced into Muzika!</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Comparison Table: Muzika vs Big Tech Streaming -->
+    <section id="comparison" class="py-20 bg-gray-950 border-t border-white/5">
+      <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="text-center max-w-3xl mx-auto mb-16">
+          <span class="text-xs font-mono font-bold uppercase tracking-wider text-emerald-400">Clear Contrast</span>
+          <h2 class="text-3xl sm:text-5xl font-black tracking-tight text-white mt-2 mb-4">
+            How Muzika Compares
+          </h2>
+          <p class="text-gray-400 text-base">
+            See how Muzika protects your wallet, your time, and your music files compared to traditional subscription streaming apps.
+          </p>
+        </div>
+
+        <div class="glass-card rounded-3xl overflow-hidden border border-white/10">
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-sm">
+              <thead>
+                <tr class="border-b border-white/10 bg-white/[0.02]">
+                  <th class="py-4 px-6 font-bold text-gray-400">Feature</th>
+                  <th class="py-4 px-6 font-black text-emerald-400 bg-emerald-500/10">Muzika</th>
+                  <th class="py-4 px-6 font-medium text-gray-400">Mainstream Streaming Apps</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-white/5">
+                <tr>
+                  <td class="py-4 px-6 font-medium text-white">Monthly Subscription</td>
+                  <td class="py-4 px-6 font-bold text-emerald-400 bg-emerald-500/10">100% Free Forever</td>
+                  <td class="py-4 px-6 text-gray-400">$10.99 - $16.99 / month</td>
+                </tr>
+                <tr>
+                  <td class="py-4 px-6 font-medium text-white">Account &amp; Sign-Up</td>
+                  <td class="py-4 px-6 font-bold text-emerald-400 bg-emerald-500/10">None (Instant Play)</td>
+                  <td class="py-4 px-6 text-gray-400">Mandatory login + credit card</td>
+                </tr>
+                <tr>
+                  <td class="py-4 px-6 font-medium text-white">True Offline Storage</td>
+                  <td class="py-4 px-6 font-bold text-emerald-400 bg-emerald-500/10">Yes (Native IndexedDB)</td>
+                  <td class="py-4 px-6 text-gray-400">DRM-locked behind paywall</td>
+                </tr>
+                <tr>
+                  <td class="py-4 px-6 font-medium text-white">Export to Real MP3</td>
+                  <td class="py-4 px-6 font-bold text-emerald-400 bg-emerald-500/10">Yes (Direct 1-Click Export)</td>
+                  <td class="py-4 px-6 text-gray-400">Strictly prohibited / encrypted</td>
+                </tr>
+                <tr>
+                  <td class="py-4 px-6 font-medium text-white">Multi-Queue Workspaces</td>
+                  <td class="py-4 px-6 font-bold text-emerald-400 bg-emerald-500/10">Yes (Independent State Queues)</td>
+                  <td class="py-4 px-6 text-gray-400">Single queue only</td>
+                </tr>
+                <tr>
+                  <td class="py-4 px-6 font-medium text-white">5-Band Parametric DSP EQ</td>
+                  <td class="py-4 px-6 font-bold text-emerald-400 bg-emerald-500/10">Yes (Bass Boost + Preamp)</td>
+                  <td class="py-4 px-6 text-gray-400">Basic or absent presets</td>
+                </tr>
+                <tr>
+                  <td class="py-4 px-6 font-medium text-white">RiPlay SQLite Import</td>
+                  <td class="py-4 px-6 font-bold text-emerald-400 bg-emerald-500/10">Yes (Native WebAssembly)</td>
+                  <td class="py-4 px-6 text-gray-400">Not supported</td>
+                </tr>
+                <tr>
+                  <td class="py-4 px-6 font-medium text-white">Ad Tracking &amp; Analytics</td>
+                  <td class="py-4 px-6 font-bold text-emerald-400 bg-emerald-500/10">Zero Tracking</td>
+                  <td class="py-4 px-6 text-gray-400">Extensive data profiling</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Community & GitHub Issue Reporting Section -->
+    <section class="py-20 relative border-t border-white/5">
+      <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+        <div class="w-16 h-16 rounded-3xl bg-white/5 border border-white/10 flex items-center justify-center text-white mx-auto mb-6 shadow-xl">
+          <svg class="w-8 h-8" fill="currentColor" viewBox="0 0 24 24"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
+        </div>
+
+        <h2 class="text-3xl font-black text-white mb-4">
+          Open Source &amp; Community Driven
+        </h2>
+        <p class="text-gray-400 text-base max-w-xl mx-auto mb-8">
+          Muzika is built with and for the community. If you run into any bug, playback hitch, or have an idea for the next feature, please report it directly on our GitHub repository.
+        </p>
+
+        <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
+          <a href="https://github.com/Ronin-117/Muzika" target="_blank" rel="noopener noreferrer" class="px-6 py-3.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-sm transition flex items-center gap-2 border border-white/10">
+            <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+            <span>Star Ronin-117/Muzika</span>
+          </a>
+
+          <a href="https://github.com/Ronin-117/Muzika/issues" target="_blank" rel="noopener noreferrer" class="px-6 py-3.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 font-bold text-sm transition flex items-center gap-2 border border-rose-500/20">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+            <span>Report an Issue on GitHub</span>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Final Call to Action -->
+    <section class="py-24 bg-gradient-to-b from-gray-950 to-brand-950/40 border-t border-white/5 relative">
+      <div class="max-w-4xl mx-auto px-4 text-center">
+        <h2 class="text-3xl sm:text-5xl font-black text-white mb-6">
+          Ready for Better Music Listening?
+        </h2>
+        <p class="text-gray-400 text-lg mb-10 max-w-xl mx-auto">
+          No sign-up. No credit card. Just pure audio playback right in your browser.
+        </p>
+        <a href="https://my-muzika.duckdns.org/" class="inline-flex items-center gap-3 px-10 py-5 rounded-2xl bg-gradient-to-r from-emerald-400 to-brand-500 text-gray-950 font-black text-lg shadow-2xl shadow-brand-500/30 hover:scale-105 active:scale-100 transition">
+          <svg class="w-6 h-6 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+          <span>Open Muzika Web App Now</span>
+        </a>
+      </div>
+    </section>
+  </main>
+
+  <!-- Footer -->
+  <footer class="bg-gray-950 border-t border-white/5 py-10 text-xs text-gray-500">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-center sm:text-left">
+      <div>
+        <p class="font-bold text-gray-300">Muzika Music Player</p>
+        <p class="mt-1">PWA Client · 100% Client-Side Storage · Built with respect for listeners.</p>
+      </div>
+      <div class="flex items-center gap-6">
+        <a href="https://my-muzika.duckdns.org/" class="hover:text-emerald-400 transition">Web App</a>
+        <a href="https://github.com/Ronin-117/Muzika" target="_blank" rel="noopener noreferrer" class="hover:text-white transition">GitHub Repository</a>
+        <a href="https://github.com/Ronin-117/Muzika/issues" target="_blank" rel="noopener noreferrer" class="hover:text-white transition">Issues &amp; Feedback</a>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Interactive JavaScript for Tabs & Copy Button -->
+  <script>
+    function switchInstallTab(platform) {
+      // Buttons
+      const tabIos = document.getElementById('tab-ios');
+      const tabAndroid = document.getElementById('tab-android');
+      const tabDesktop = document.getElementById('tab-desktop');
+
+      // Panels
+      const contentIos = document.getElementById('content-ios');
+      const contentAndroid = document.getElementById('content-android');
+      const contentDesktop = document.getElementById('content-desktop');
+
+      // Reset button styles
+      [tabIos, tabAndroid, tabDesktop].forEach(btn => {
+        btn.className = 'px-5 py-2.5 rounded-xl font-bold text-sm transition flex items-center gap-2 text-gray-400 hover:text-white';
+      });
+
+      // Hide all panels
+      contentIos.classList.add('hidden');
+      contentAndroid.classList.add('hidden');
+      contentDesktop.classList.add('hidden');
+
+      // Activate selected
+      if (platform === 'ios') {
+        tabIos.className = 'px-5 py-2.5 rounded-xl font-bold text-sm transition flex items-center gap-2 bg-emerald-400 text-black shadow-md';
+        contentIos.classList.remove('hidden');
+      } else if (platform === 'android') {
+        tabAndroid.className = 'px-5 py-2.5 rounded-xl font-bold text-sm transition flex items-center gap-2 bg-emerald-400 text-black shadow-md';
+        contentAndroid.classList.remove('hidden');
+      } else if (platform === 'desktop') {
+        tabDesktop.className = 'px-5 py-2.5 rounded-xl font-bold text-sm transition flex items-center gap-2 bg-emerald-400 text-black shadow-md';
+        contentDesktop.classList.remove('hidden');
+      }
+    }
+
+    function copyLink() {
+      const url = "https://my-muzika.duckdns.org/";
+      navigator.clipboard.writeText(url).then(() => {
+        const copyText = document.getElementById('copyText');
+        const copyBtn = document.getElementById('copyBtn');
+        copyText.textContent = "Copied!";
+        copyBtn.classList.add('bg-emerald-500', 'text-black');
+        copyBtn.classList.remove('bg-white/10', 'text-white');
+
+        setTimeout(() => {
+          copyText.textContent = "Copy Link";
+          copyBtn.classList.remove('bg-emerald-500', 'text-black');
+          copyBtn.classList.add('bg-white/10', 'text-white');
+        }, 2500);
+      }).catch(() => {
+        prompt("Copy this URL:", url);
+      });
+    }
+  </script>
+</body>
+</html>

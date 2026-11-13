@@ -263,6 +263,7 @@ export class OnlineMusicService {
   /**
    * Automatically resolves a guaranteed FULL-LENGTH 320kbps audio stream
    * for any track so it plays from 0:00 to the very end with mobile screen-off support.
+   * Uses strict artist+title+duration matching so covers/remixes are never hijacked by wrong artists.
    */
   static async resolveStreamUrl(song: Song): Promise<string | undefined> {
     // 1. If song already has a direct valid audio stream URL, return it immediately
@@ -275,10 +276,11 @@ export class OnlineMusicService {
     }
 
     const cleanTitle = song.title.replace(/\([^)]*\)|\[[^\]]*\]/g, '').trim();
+    const vidId = song.youtubeId || (song.id.startsWith('yt-') ? song.id.replace('yt-', '') : '');
 
-    // 2. Query full-stack backend /api/stream endpoint for 320kbps direct stream URL
+    // 2. Query full-stack backend /api/stream endpoint with vidId & duration for strict matching
     try {
-      const backendUrl = `/api/stream?title=${encodeURIComponent(cleanTitle)}&artist=${encodeURIComponent(song.artist)}&json=true`;
+      const backendUrl = `/api/stream?title=${encodeURIComponent(cleanTitle)}&artist=${encodeURIComponent(song.artist || '')}&id=${encodeURIComponent(vidId)}&duration=${song.duration || 0}&json=true`;
       const res = await fetch(backendUrl);
       if (res.ok) {
         const data = await res.json();
@@ -291,52 +293,201 @@ export class OnlineMusicService {
       // ignore
     }
 
-    // 3. Fallback: Query direct client CDN resolver
-    try {
-      const term = `${cleanTitle} ${song.artist}`.trim();
-      const res = await fetch(`https://saavn-api-one.vercel.app/search/songs?query=${encodeURIComponent(term)}`);
-      if (res.ok) {
-        const data = await res.json();
-        const hit = data.data?.results?.[0];
-        if (hit && hit.downloadUrl) {
-          const downloadObj =
-            hit.downloadUrl.find((d: any) => d.quality === '320kbps') ||
-            hit.downloadUrl[hit.downloadUrl.length - 1];
-          const directLink = downloadObj?.link || downloadObj?.url;
-          if (directLink) {
-            song.streamUrl = directLink;
-            if (hit.duration > 30) song.duration = hit.duration;
-            return directLink;
+    // 3. Client-side verified fallback (only if artist is known or no vidId exists)
+    const isUnknownArtist =
+      !song.artist ||
+      song.artist.toLowerCase() === 'unknown artist' ||
+      song.artist.toLowerCase() === 'unknown' ||
+      song.artist.toLowerCase() === 'various artists';
+
+    if (!isUnknownArtist) {
+      try {
+        const term = `${cleanTitle} ${song.artist}`.trim();
+        const res = await fetch(`https://saavn-api-one.vercel.app/search/songs?query=${encodeURIComponent(term)}`);
+        if (res.ok) {
+          const data = await res.json();
+          const results: any[] = data.data?.results || [];
+          const normReqTitle = this.normalizeText(cleanTitle);
+          const normReqArtist = this.normalizeText(song.artist);
+
+          const hit = results.slice(0, 6).find((r: any) => {
+            if (!r?.downloadUrl) return false;
+            const hitTitle = this.normalizeText(r.name || '');
+            const hitArtist = this.normalizeText(r.primaryArtists || '');
+            const hitAlbum = this.normalizeText(r.album?.name || '');
+            const titleOk = hitTitle.includes(normReqTitle) || normReqTitle.includes(hitTitle);
+            const artistTokens = normReqArtist.split(' ').filter((t) => t.length > 1);
+            const artistOk =
+              artistTokens.length === 0 ||
+              artistTokens.some((tok) => hitArtist.includes(tok) || hitTitle.includes(tok) || hitAlbum.includes(tok));
+            const durOk =
+              !song.duration || song.duration <= 30 || !r.duration || Math.abs(Number(r.duration) - song.duration) <= 25;
+            return titleOk && artistOk && durOk;
+          });
+
+          if (hit && hit.downloadUrl) {
+            const downloadObj =
+              hit.downloadUrl.find((d: any) => d.quality === '320kbps') ||
+              hit.downloadUrl[hit.downloadUrl.length - 1];
+            const directLink = downloadObj?.link || downloadObj?.url;
+            if (directLink) {
+              song.streamUrl = directLink;
+              if (hit.duration > 30) song.duration = Number(hit.duration);
+              return directLink;
+            }
           }
         }
+      } catch {
+        // ignore
       }
-    } catch {
-      // ignore
     }
 
-    // 4. Fallback search by title only
+    return undefined;
+  }
+
+  private static normalizeText(str: string): string {
+    return String(str || '')
+      .replace(/&amp;/g, '&')
+      .replace(/&quot;/g, '"')
+      .replace(/&#039;|&apos;/g, "'")
+      .toLowerCase()
+      .replace(/\([^)]*\)|\[[^\]]*\]/g, ' ')
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  /**
+   * Fetches candidate matches for Sync Song (both Auto-Sync & Manual Sync UI).
+   */
+  static async fetchSyncCandidates(params: {
+    query?: string;
+    title?: string;
+    artist?: string;
+    vidId?: string;
+    limit?: number;
+  }): Promise<{
+    resolvedMeta: { title: string; artist: string; thumbnailUrl: string } | null;
+    queryUsed: string;
+    candidates: Song[];
+  }> {
+    const query = (params.query || '').trim();
+    const title = (params.title || '').trim();
+    const artist = (params.artist || '').trim();
+    const vidId = (params.vidId || '').trim();
+    const limit = params.limit || 18;
+
     try {
-      const res = await fetch(`https://saavn-api-one.vercel.app/search/songs?query=${encodeURIComponent(cleanTitle)}`);
+      const url = `/api/sync-candidates?q=${encodeURIComponent(query)}&title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}&vidId=${encodeURIComponent(vidId)}&limit=${limit}`;
+      const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
-        const hit = data.data?.results?.[0];
-        if (hit && hit.downloadUrl) {
-          const downloadObj =
-            hit.downloadUrl.find((d: any) => d.quality === '320kbps') ||
-            hit.downloadUrl[hit.downloadUrl.length - 1];
-          const directLink = downloadObj?.link || downloadObj?.url;
-          if (directLink) {
-            song.streamUrl = directLink;
-            if (hit.duration > 30) song.duration = hit.duration;
-            return directLink;
-          }
-        }
+        return {
+          resolvedMeta: data.resolvedMeta || null,
+          queryUsed: data.queryUsed || query || `${title} ${artist}`.trim(),
+          candidates: Array.isArray(data.candidates) ? data.candidates : [],
+        };
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      console.warn('Sync candidates backend fetch failed, falling back:', err);
     }
 
-    return song.streamUrl;
+    // Fallback to client-side search if backend is unavailable
+    const effectiveQuery = query || `${title} ${artist && artist !== 'Unknown Artist' ? artist : ''}`.trim();
+    const fallbackSongs = effectiveQuery ? await this.searchOnlineMusic(effectiveQuery, limit) : [];
+    return {
+      resolvedMeta: null,
+      queryUsed: effectiveQuery,
+      candidates: fallbackSongs,
+    };
+  }
+
+  /**
+   * Scores and picks the best matching candidate for Auto-Sync.
+   */
+  static pickBestSyncMatch(
+    originalSong: Song,
+    candidates: Song[],
+    resolvedMeta?: { title?: string; artist?: string } | null
+  ): Song | null {
+    if (!candidates || candidates.length === 0) return null;
+
+    const origIsUnknown =
+      !originalSong.artist ||
+      originalSong.artist.toLowerCase() === 'unknown artist' ||
+      originalSong.artist.toLowerCase() === 'unknown';
+
+    const targetTitle = this.normalizeText(
+      (originalSong.title && originalSong.title !== 'Untitled Song' ? originalSong.title : resolvedMeta?.title) || ''
+    );
+    const targetArtist = this.normalizeText(
+      !origIsUnknown ? originalSong.artist : (resolvedMeta?.artist && resolvedMeta.artist !== 'Unknown Artist' ? resolvedMeta.artist : '')
+    );
+
+    const titleTokens = targetTitle.split(' ').filter((t) => t.length > 1);
+    const artistTokens = targetArtist.split(' ').filter((t) => t.length > 1);
+
+    let best: Song | null = null;
+    let bestScore = -Infinity;
+
+    for (let i = 0; i < candidates.length; i++) {
+      const cand = candidates[i];
+      const cTitle = this.normalizeText(cand.title);
+      const cArtist = this.normalizeText(cand.artist);
+      const cAlbum = this.normalizeText(cand.album || '');
+      const combined = `${cTitle} ${cArtist} ${cAlbum}`;
+
+      let score = 0;
+
+      // Prefer earlier search rank slightly as tie-breaker
+      score += Math.max(0, 10 - i * 0.5);
+
+      // Title match
+      if (targetTitle && cTitle === targetTitle) score += 40;
+      else if (targetTitle && (cTitle.includes(targetTitle) || targetTitle.includes(cTitle))) score += 25;
+      if (titleTokens.length > 0) {
+        const matchedTitleTokens = titleTokens.filter((t) => cTitle.includes(t)).length;
+        score += (matchedTitleTokens / titleTokens.length) * 30;
+      }
+
+      // Artist match (critical)
+      if (artistTokens.length > 0) {
+        const matchedArtistTokens = artistTokens.filter((t) => combined.includes(t)).length;
+        if (matchedArtistTokens > 0) {
+          score += (matchedArtistTokens / artistTokens.length) * 50;
+        } else {
+          // Artist mismatch penalty!
+          score -= 45;
+        }
+      } else if (cand.artist && cand.artist !== 'Unknown Artist') {
+        // Bonus when original had Unknown Artist and candidate gives real artist metadata
+        score += 15;
+      }
+
+      // Avoid selecting the exact broken source unless it gained real artist metadata from oEmbed
+      if (
+        originalSong.youtubeId &&
+        cand.youtubeId === originalSong.youtubeId &&
+        !origIsUnknown
+      ) {
+        // Slightly prefer alternative clean match if user explicitly hit Auto Sync because playback seemed off
+        score -= 5;
+      }
+
+      // Duration closeness
+      if (originalSong.duration > 30 && cand.duration > 30) {
+        const diff = Math.abs(originalSong.duration - cand.duration);
+        if (diff <= 10) score += 10;
+        else if (diff > 35) score -= 15;
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        best = cand;
+      }
+    }
+
+    return best || candidates[0];
   }
 
   /**
@@ -363,7 +514,7 @@ export class OnlineMusicService {
 
     // 2. Fetch via internal server proxy (guaranteed same-origin, no CORS restriction, full length)
     try {
-      const proxyUrl = `/api/stream?title=${encodeURIComponent(cleanTitle)}&artist=${encodeURIComponent(song.artist)}&id=${encodeURIComponent(vidId)}`;
+      const proxyUrl = `/api/stream?title=${encodeURIComponent(cleanTitle)}&artist=${encodeURIComponent(song.artist)}&id=${encodeURIComponent(vidId)}&duration=${song.duration || 0}`;
       const resp = await fetch(proxyUrl);
       if (resp.ok) {
         const blob = await resp.blob();

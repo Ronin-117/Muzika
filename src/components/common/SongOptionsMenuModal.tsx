@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useMusic } from '../../context/MusicContext';
 import {
   X,
@@ -15,6 +15,9 @@ import {
   Sliders,
   Moon,
   Info,
+  RefreshCw,
+  SearchCheck,
+  Loader2,
 } from 'lucide-react';
 
 export const SongOptionsMenuModal: React.FC = () => {
@@ -22,6 +25,8 @@ export const SongOptionsMenuModal: React.FC = () => {
     songOptionsMenuTarget,
     setSongOptionsMenuTarget,
     setAddToPlaylistTargetSong,
+    setSyncTargetSong,
+    autoSyncSong,
     playNextInQueue,
     addToQueue,
     toggleLike,
@@ -40,6 +45,8 @@ export const SongOptionsMenuModal: React.FC = () => {
     showToast,
   } = useMusic();
 
+  const [isAutoSyncing, setIsAutoSyncing] = useState(false);
+
   if (!songOptionsMenuTarget) return null;
 
   const song = songOptionsMenuTarget.song;
@@ -49,6 +56,26 @@ export const SongOptionsMenuModal: React.FC = () => {
   const handleClose = () => {
     hapticFeedback();
     setSongOptionsMenuTarget(null);
+  };
+
+  const handleAutoSync = async () => {
+    hapticFeedback();
+    setIsAutoSyncing(true);
+    showToast(`Auto-syncing "${song.title}"...`);
+    try {
+      await autoSyncSong(song);
+    } finally {
+      setIsAutoSyncing(false);
+      setSongOptionsMenuTarget(null);
+    }
+  };
+
+  const handleOpenManualSync = () => {
+    hapticFeedback();
+    setSongOptionsMenuTarget(null);
+    setTimeout(() => {
+      setSyncTargetSong(song);
+    }, 50);
   };
 
   const handlePlayNext = () => {
@@ -184,6 +211,35 @@ export const SongOptionsMenuModal: React.FC = () => {
 
         {/* Options List */}
         <div className="space-y-1 text-xs font-medium max-h-80 overflow-y-auto pr-1 no-scrollbar">
+          <button
+            onClick={handleAutoSync}
+            disabled={isAutoSyncing}
+            className="w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-left transition disabled:opacity-60"
+          >
+            <span className="flex items-center gap-3">
+              {isAutoSyncing ? (
+                <Loader2 className="w-4 h-4 text-emerald-400 animate-spin" />
+              ) : (
+                <RefreshCw className="w-4 h-4 text-emerald-400" />
+              )}
+              <span className="font-bold text-emerald-300">Auto Sync &amp; Play</span>
+            </span>
+            <span className="text-[10px] opacity-60">Auto-fix track</span>
+          </button>
+
+          <button
+            onClick={handleOpenManualSync}
+            className="w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl bg-white/5 hover:bg-white/15 text-left transition"
+          >
+            <span className="flex items-center gap-3">
+              <SearchCheck className="w-4 h-4 text-cyan-400" />
+              <span className="font-bold text-white">Sync Manually</span>
+            </span>
+            <span className="text-[10px] opacity-60">Test &amp; choose</span>
+          </button>
+
+          <div className="h-px bg-white/10 my-1.5" />
+
           <button
             onClick={handlePlayNext}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/10 text-left transition"

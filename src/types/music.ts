@@ -17,6 +17,7 @@ export interface Song {
   playCount?: number;
   lastPlayedAt?: number;
   addedAt?: number;
+  syncedAt?: number;
 }
 
 export interface Artist {

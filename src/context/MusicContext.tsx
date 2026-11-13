@@ -180,6 +180,13 @@ interface MusicContextType {
   setAddToPlaylistTargetSong: (song: Song | null) => void;
   songOptionsMenuTarget: { song: Song; queueContext?: Song[] } | null;
   setSongOptionsMenuTarget: (target: { song: Song; queueContext?: Song[] } | null) => void;
+  syncTargetSong: Song | null;
+  setSyncTargetSong: (song: Song | null) => void;
+  previewingSongId: string | null;
+  previewSongCandidate: (candidate: Song) => Promise<void>;
+  stopPreviewCandidate: () => void;
+  applySongSync: (originalSong: Song, matchedSong: Song, playImmediately?: boolean) => Promise<Song>;
+  autoSyncSong: (song: Song) => Promise<Song | null>;
   toastMessage: string | null;
   showToast: (message: string) => void;
 }
@@ -227,6 +234,8 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   // Quick Action Modals & Toast State
   const [addToPlaylistTargetSong, setAddToPlaylistTargetSong] = useState<Song | null>(null);
   const [songOptionsMenuTarget, setSongOptionsMenuTarget] = useState<{ song: Song; queueContext?: Song[] } | null>(null);
+  const [syncTargetSong, setSyncTargetSong] = useState<Song | null>(null);
+  const [previewingSongId, setPreviewingSongId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimerRef = useRef<number | null>(null);
 
@@ -638,6 +647,8 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   // Audio Engines
   const ytControllerRef = useRef<YouTubeController | null>(null);
   const htmlAudioRef = useRef<HTMLAudioElement | null>(null);
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const isPreviewingRef = useRef<boolean>(false);
   const silentKeepAliveRef = useRef<HTMLAudioElement | null>(null);
   const activeEngineRef = useRef<'youtube' | 'html'>('html');
   const sleepTimerIntervalRef = useRef<number | null>(null);
@@ -832,6 +843,14 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   useEffect(() => {
     const yt = new YouTubeController('muzika-yt-embed', {
       onStateChange: (state) => {
+        // Ignore main player state updates while testing candidates inside Manual Sync modal
+        if (isPreviewingRef.current) {
+          if (state === 0) {
+            isPreviewingRef.current = false;
+            setPreviewingSongId(null);
+          }
+          return;
+        }
         // -1: unstarted, 0: ended, 1: playing, 2: paused, 3: buffering, 5: video cued
         if (activeEngineRef.current === 'youtube') {
           if (state === 1) {
@@ -857,6 +876,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         }
       },
       onTimeUpdate: (time, dur) => {
+        if (isPreviewingRef.current) return;
         if (activeEngineRef.current === 'youtube') {
           setCurrentTime(time);
           if (dur > 0) setDuration(dur);
@@ -1080,10 +1100,12 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   };
 
   const playIndex = async (index: number, startAtSecond?: number, overrideQueue?: Song[], overrideSong?: Song) => {
+    stopPreviewCandidate();
     const activeQueue = overrideQueue || queueRef.current;
     if (index < 0 || index >= activeQueue.length) return;
-    const song = overrideSong || activeQueue[index];
-    if (!song) return;
+    const rawSong = overrideSong || activeQueue[index];
+    if (!rawSong) return;
+    const song = StorageService.applySongSyncOverride(rawSong);
 
     // Check blacklist: if blacklisted, try skip to next
     if (isBlacklisted(song)) {
@@ -1753,6 +1775,228 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     return summary;
   };
 
+  // Stop any active candidate test preview inside SyncSongModal
+  const stopPreviewCandidate = () => {
+    if (previewAudioRef.current) {
+      try {
+        previewAudioRef.current.pause();
+        previewAudioRef.current.src = '';
+      } catch {}
+      previewAudioRef.current = null;
+    }
+    if (isPreviewingRef.current && ytControllerRef.current) {
+      try {
+        ytControllerRef.current.pause();
+      } catch {}
+    }
+    isPreviewingRef.current = false;
+    setPreviewingSongId(null);
+  };
+
+  // Preview a candidate song inside Manual Sync without modifying the user's queue or song
+  const previewSongCandidate = async (candidate: Song) => {
+    hapticFeedback();
+
+    // Toggle off if already previewing this candidate
+    if (previewingSongId === candidate.id && isPreviewingRef.current) {
+      stopPreviewCandidate();
+      return;
+    }
+
+    stopPreviewCandidate();
+
+    // Pause active main playback while testing candidate
+    userPausedRef.current = true;
+    if (htmlAudioRef.current && !htmlAudioRef.current.paused) {
+      htmlAudioRef.current.pause();
+    }
+    if (ytControllerRef.current) {
+      ytControllerRef.current.pause();
+    }
+    setIsPlaying(false);
+
+    isPreviewingRef.current = true;
+    setPreviewingSongId(candidate.id);
+
+    // 1. Direct audio stream preview (320kbps MP4 or pre-resolved streamUrl)
+    if (candidate.streamUrl) {
+      try {
+        const audio = new Audio(candidate.streamUrl);
+        audio.volume = Math.max(0.2, Math.min(1, volume / 100));
+        audio.onended = () => {
+          isPreviewingRef.current = false;
+          setPreviewingSongId(null);
+        };
+        audio.onerror = () => {
+          isPreviewingRef.current = false;
+          setPreviewingSongId(null);
+        };
+        previewAudioRef.current = audio;
+        await audio.play();
+        return;
+      } catch {
+        // fallback to YouTube if available
+      }
+    }
+
+    // 2. YouTube video preview via unlocked YouTubeController
+    const ytId = candidate.youtubeId || (candidate.id.startsWith('yt-') ? candidate.id.replace('yt-', '') : '');
+    if (ytId && ytControllerRef.current) {
+      ytControllerRef.current.loadVideoById(ytId, 0);
+      ytControllerRef.current.play();
+    } else {
+      showToast('Preview stream unavailable for this candidate');
+      stopPreviewCandidate();
+    }
+  };
+
+  // Rewrite an existing song across all playlists, liked songs, history, queues, and storage
+  const applySongSync = async (
+    originalSong: Song,
+    matchedSong: Song,
+    playImmediately = true
+  ): Promise<Song> => {
+    hapticFeedback();
+    stopPreviewCandidate();
+
+    const rewritten: Song = {
+      ...originalSong,
+      title: matchedSong.title || originalSong.title,
+      artist: matchedSong.artist || originalSong.artist,
+      album: matchedSong.album ?? originalSong.album,
+      duration: matchedSong.duration || originalSong.duration,
+      thumbnailUrl: matchedSong.thumbnailUrl || originalSong.thumbnailUrl,
+      source: matchedSong.source,
+      youtubeId: matchedSong.youtubeId,
+      // Explicitly reset stale streamUrl unless matched candidate carries an explicit streamUrl
+      streamUrl: matchedSong.source === 'stream' ? matchedSong.streamUrl : undefined,
+      syncedAt: Date.now(),
+    };
+
+    // 1. Save persistent override so future lookups or re-imports use the fixed version
+    StorageService.saveSongSyncOverride(originalSong.id, rewritten);
+
+    // 2. Clear any stale cached audio blob from IndexedDB if cached under old mismatched version
+    if (cachedSongIds.has(originalSong.id)) {
+      await offlineCacheService.removeCachedSong(originalSong.id).catch(() => {});
+    }
+
+    const replaceInList = (list: Song[]) =>
+      list.map((s) => (s.id === originalSong.id ? { ...s, ...rewritten, id: s.id } : s));
+
+    // 3. Rewrite inside Playlists & active SelectedPlaylist
+    setPlaylists((prev) => {
+      const updated = prev.map((pl) => ({
+        ...pl,
+        songs: replaceInList(pl.songs),
+      }));
+      StorageService.savePlaylists(updated);
+      return updated;
+    });
+    setSelectedPlaylistState((prev) =>
+      prev ? { ...prev, songs: replaceInList(prev.songs) } : null
+    );
+
+    // 4. Rewrite inside Liked Songs
+    setLikedSongs((prev) => {
+      const updated = replaceInList(prev);
+      StorageService.saveLikedSongs(updated);
+      return updated;
+    });
+
+    // 5. Rewrite inside History
+    setHistory((prev) => {
+      const updated = replaceInList(prev);
+      StorageService.saveHistory(updated);
+      return updated;
+    });
+
+    // 6. Rewrite inside Active Queue & Multi-Queue workspaces
+    const updatedActiveQueue = replaceInList(queueRef.current);
+    setQueue(updatedActiveQueue);
+    queueRef.current = updatedActiveQueue;
+
+    setQueuesState((prev) => {
+      const updated = prev.map((q) => ({
+        ...q,
+        songs: replaceInList(q.songs),
+      }));
+      StorageService.saveNamedQueues(updated);
+      return updated;
+    });
+
+    // 7. Rewrite inside Imported / Saved Artists & Albums
+    setImportedArtists((prev) => {
+      const updated = prev.map((a) => ({ ...a, topSongs: replaceInList(a.topSongs) }));
+      StorageService.saveCustomArtists(updated);
+      return updated;
+    });
+    setSavedArtists((prev) => {
+      const updated = prev.map((a) => ({ ...a, topSongs: replaceInList(a.topSongs) }));
+      StorageService.saveSavedArtists(updated);
+      return updated;
+    });
+    setSelectedArtist((prev) =>
+      prev ? { ...prev, topSongs: replaceInList(prev.topSongs) } : null
+    );
+
+    setImportedAlbums((prev) => {
+      const updated = prev.map((alb) => ({ ...alb, songs: replaceInList(alb.songs) }));
+      StorageService.saveCustomAlbums(updated);
+      return updated;
+    });
+    setSavedAlbums((prev) => {
+      const updated = prev.map((alb) => ({ ...alb, songs: replaceInList(alb.songs) }));
+      StorageService.saveSavedAlbums(updated);
+      return updated;
+    });
+    setSelectedAlbumState((prev) =>
+      prev ? { ...prev, songs: replaceInList(prev.songs) } : null
+    );
+
+    // 8. Rewrite currentSong if matching
+    if (currentSongRef.current?.id === originalSong.id) {
+      setCurrentSong(rewritten);
+      currentSongRef.current = rewritten;
+    }
+
+    // 9. Play immediately with fresh rewritten track details
+    if (playImmediately) {
+      const idxInQueue = updatedActiveQueue.findIndex((s) => s.id === rewritten.id);
+      if (idxInQueue !== -1) {
+        playIndex(idxInQueue, 0, updatedActiveQueue, rewritten);
+      } else {
+        const nextQ = [rewritten, ...updatedActiveQueue];
+        setQueue(nextQ);
+        queueRef.current = nextQ;
+        playIndex(0, 0, nextQ, rewritten);
+      }
+    }
+
+    showToast(`Synced: "${rewritten.title}" by ${rewritten.artist}`);
+    return rewritten;
+  };
+
+  // Automatically find best match for a song and rewrite + play immediately
+  const autoSyncSong = async (song: Song): Promise<Song | null> => {
+    hapticFeedback();
+    const vidId = song.youtubeId || (song.id.startsWith('yt-') ? song.id.replace('yt-', '') : '');
+    const { resolvedMeta, candidates } = await OnlineMusicService.fetchSyncCandidates({
+      title: song.title,
+      artist: song.artist,
+      vidId,
+      limit: 15,
+    });
+
+    const bestMatch = OnlineMusicService.pickBestSyncMatch(song, candidates, resolvedMeta);
+    if (!bestMatch) {
+      showToast('No matching tracks found — try Manual Sync');
+      return null;
+    }
+
+    return await applySongSync(song, bestMatch, true);
+  };
+
   return (
     <MusicContext.Provider
       value={{
@@ -1858,6 +2102,13 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         setAddToPlaylistTargetSong,
         songOptionsMenuTarget,
         setSongOptionsMenuTarget,
+        syncTargetSong,
+        setSyncTargetSong,
+        previewingSongId,
+        previewSongCandidate,
+        stopPreviewCandidate,
+        applySongSync,
+        autoSyncSong,
         toastMessage,
         showToast,
         enableMultipleQueues,
