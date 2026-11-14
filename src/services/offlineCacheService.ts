@@ -42,7 +42,9 @@ class OfflineCacheService {
       this.initDB().then(() => {
         this.refreshCachedIds();
         this.requestPersistence().catch(() => {});
-        this.autoRepairCorruptedTracks().catch(() => {});
+        setTimeout(() => {
+          this.autoRepairCorruptedTracks().catch(() => {});
+        }, 4000);
       });
 
       window.addEventListener('online', () => {
@@ -203,16 +205,17 @@ class OfflineCacheService {
           return false;
         }
 
+        const controller = new AbortController();
+        const dlTimer = setTimeout(() => controller.abort(), 50000);
         try {
-          const downloaded = await Promise.race([
-            OnlineMusicService.fetchAudioBlob(song),
-            new Promise<null>((resolve) => setTimeout(() => resolve(null), 32000)),
-          ]);
+          const downloaded = await OnlineMusicService.fetchAudioBlob(song, controller.signal);
           if (downloaded && downloaded.size > 1000) {
             finalBlob = downloaded;
           }
         } catch {
-          // download failed
+          // download failed or timed out
+        } finally {
+          clearTimeout(dlTimer);
         }
       }
 
@@ -230,20 +233,23 @@ class OfflineCacheService {
       // Also cache album artwork locally if possible (5s max timeout so artwork never stalls download)
       let artworkBlob: Blob | undefined;
       if (song.thumbnailUrl && song.thumbnailUrl.startsWith('http') && (typeof navigator === 'undefined' || navigator.onLine)) {
+        const imgCtrl = new AbortController();
+        const imgTimer = setTimeout(() => imgCtrl.abort(), 5000);
         try {
-          const imgSignal = typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal ? AbortSignal.timeout(5000) : undefined;
-          const imgResp = await fetch(song.thumbnailUrl, { signal: imgSignal });
+          const imgResp = await fetch(song.thumbnailUrl, { signal: imgCtrl.signal });
           if (imgResp.ok) {
             artworkBlob = await imgResp.blob();
           }
         } catch {
           // ignore
+        } finally {
+          clearTimeout(imgTimer);
         }
       }
 
-      // Calculate real stored data size (never fake 0.2MB)
+      // Calculate real stored data size
       const audioSize = finalBlob.size;
-      const artworkSize = artworkBlob && artworkBlob.size > 500 ? artworkBlob.size : 180000;
+      const artworkSize = artworkBlob && artworkBlob.size > 500 ? artworkBlob.size : 0;
       const sizeBytes = audioSize + artworkSize;
 
       const record: CachedTrackRecord = {
@@ -326,8 +332,9 @@ class OfflineCacheService {
       const corrupted = all.filter((r) => !r.audioBlob || r.audioBlob.size <= 1000);
       if (corrupted.length === 0) return;
 
-      for (const item of corrupted) {
+      for (const item of corrupted.slice(0, 3)) {
         if (typeof navigator !== 'undefined' && !navigator.onLine) break;
+        if (this.inFlightCaches.has(item.song.id)) continue;
         try {
           await this.cacheSong(item.song);
         } catch {

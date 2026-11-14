@@ -1298,10 +1298,17 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       }
     }
 
-    // Auto-cache real audio stream in background ONLY if enabled, device is online, and song is not already cached
+    // Auto-cache real audio stream in background ONLY when enabled, online, not already cached,
+    // and playing via direct HTML5 audio stream (YouTube-iframe-only fallback tracks have no downloadable stream)
     const isAlreadyCached = !!(cachedData && cachedData.audioUrl);
     const isOnline = typeof navigator === 'undefined' || navigator.onLine;
-    if (cacheConfigRef.current.autoCacheOnPlay && !isAlreadyCached && isOnline) {
+    if (
+      cacheConfigRef.current.autoCacheOnPlay &&
+      !isAlreadyCached &&
+      isOnline &&
+      activeEngineRef.current === 'html' &&
+      !!song.streamUrl
+    ) {
       offlineCacheService.cacheSong(song).catch(() => {});
     }
   };

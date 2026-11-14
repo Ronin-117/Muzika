@@ -498,10 +498,11 @@ function isStrictTrackMatch(
     }
   }
 
-  // 3. Duration similarity check (prevents matching a 2:40 cover with a 3:55 original)
+  // 3. Duration similarity check (allow 45s variance when artist matched strictly so MV intros don't reject studio audio)
   const hitDur = Number(hit.duration || 0);
   if (reqDurationSec && reqDurationSec > 30 && hitDur > 30) {
-    if (Math.abs(hitDur - reqDurationSec) > 25) {
+    const maxDiff = isUnknownArtist ? 25 : 45;
+    if (Math.abs(hitDur - reqDurationSec) > maxDiff) {
       return false;
     }
   }
@@ -646,7 +647,29 @@ app.get('/api/stream', async (req: Request, res: Response) => {
   }
 
   try {
+    const requestedDirectUrl = String(req.query.directUrl || '').trim();
+    const isTrustedDirectUrl = (candidate: string): boolean => {
+      try {
+        const parsed = new URL(candidate);
+        if (parsed.protocol !== 'https:') return false;
+        const host = parsed.hostname.toLowerCase();
+        return (
+          host.endsWith('saavncdn.com') ||
+          host.endsWith('googlevideo.com') ||
+          host.endsWith('itunes.apple.com') ||
+          host.endsWith('mzstatic.com')
+        );
+      } catch {
+        return false;
+      }
+    };
+
     let streamInfo = forceRefresh ? undefined : streamCache.get(cacheKey);
+
+    if (!streamInfo && !forceRefresh && requestedDirectUrl && isTrustedDirectUrl(requestedDirectUrl)) {
+      streamInfo = { url: requestedDirectUrl, mimeType: 'audio/mp4', timestamp: Date.now() };
+      streamCache.set(cacheKey, streamInfo);
+    }
 
     if (!streamInfo || Date.now() - streamInfo.timestamp > CACHE_TTL) {
       let resolvedUrl: string | null = null;
@@ -745,6 +768,27 @@ app.get('/api/stream', async (req: Request, res: Response) => {
         }
       }
 
+      const requestedDirectUrl = String(req.query.directUrl || '').trim();
+      const isTrustedDirectUrl = (candidate: string): boolean => {
+        try {
+          const parsed = new URL(candidate);
+          if (parsed.protocol !== 'https:') return false;
+          const host = parsed.hostname.toLowerCase();
+          return (
+            host.endsWith('saavncdn.com') ||
+            host.endsWith('googlevideo.com') ||
+            host.endsWith('itunes.apple.com') ||
+            host.endsWith('mzstatic.com')
+          );
+        } catch {
+          return false;
+        }
+      };
+
+      if (!resolvedUrl && requestedDirectUrl && isTrustedDirectUrl(requestedDirectUrl)) {
+        resolvedUrl = requestedDirectUrl;
+      }
+
       if (resolvedUrl) {
         streamInfo = { url: resolvedUrl, mimeType, timestamp: Date.now() };
         streamCache.set(cacheKey, streamInfo);
@@ -757,7 +801,7 @@ app.get('/api/stream', async (req: Request, res: Response) => {
         return res.json({ streamUrl: streamInfo.url, mimeType: streamInfo.mimeType });
       }
 
-      // Proxy remote stream with HTTP Range support for HTML5 <audio> tag
+      // Proxy remote stream with HTTP Range support for HTML5 <audio> tag & offline caching
       const range = req.headers.range;
       const fetchHeaders: Record<string, string> = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
@@ -766,11 +810,27 @@ app.get('/api/stream', async (req: Request, res: Response) => {
         fetchHeaders['Range'] = range;
       }
 
-      const streamResp = await fetch(streamInfo.url, {
-        headers: fetchHeaders,
-        signal: AbortSignal.timeout(22000),
-      });
-      if (streamResp.ok || streamResp.status === 206) {
+      // Timeout ONLY the upstream header handshake (12s), NOT the entire file transfer!
+      const headerCtrl = new AbortController();
+      const headerTimer = setTimeout(() => headerCtrl.abort(), 12000);
+      let streamResp: globalThis.Response;
+      try {
+        streamResp = await fetch(streamInfo.url, {
+          headers: fetchHeaders,
+          signal: headerCtrl.signal,
+        });
+      } finally {
+        clearTimeout(headerTimer);
+      }
+
+      const respContentType = (streamResp.headers.get('content-type') || '').toLowerCase();
+      const isValidMediaResp =
+        (streamResp.ok || streamResp.status === 206) &&
+        !respContentType.includes('text/html') &&
+        !respContentType.includes('application/xml') &&
+        !respContentType.includes('application/json');
+
+      if (isValidMediaResp) {
         const statusCode = range || streamResp.status === 206 ? 206 : streamResp.status;
         res.status(statusCode);
         res.setHeader('Content-Type', streamInfo.mimeType || 'audio/mp4');
@@ -791,17 +851,25 @@ app.get('/api/stream', async (req: Request, res: Response) => {
           });
           const pump = async () => {
             while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              if (!res.writableEnded) {
-                res.write(value);
-              } else {
+              // 20s per-chunk idle timeout prevents hung sockets without killing slow valid transfers
+              const chunk = await Promise.race([
+                reader.read(),
+                new Promise<never>((_, rej) => setTimeout(() => rej(new Error('Upstream chunk timeout')), 20000)),
+              ]);
+              if (chunk.done) break;
+              if (res.writableEnded) {
+                reader.cancel().catch(() => {});
                 break;
+              }
+              const ok = res.write(chunk.value);
+              if (!ok && !res.writableEnded) {
+                await new Promise<void>((resolve) => res.once('drain', resolve));
               }
             }
             if (!res.writableEnded) res.end();
           };
           pump().catch(() => {
+            reader.cancel().catch(() => {});
             if (!res.writableEnded) res.end();
           });
           return;

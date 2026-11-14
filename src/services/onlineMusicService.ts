@@ -497,60 +497,100 @@ export class OnlineMusicService {
 
   /**
    * Fetches real playable full-length audio Blob for offline storage in IndexedDB.
-   * Guarantees that saved audio matches complete song duration (never 30s preview clips).
+   * Uses simple CORS GET (never cache: 'no-store' on third-party CDNs, which triggers
+   * an OPTIONS preflight rejected with 403 by Azure/Saavn CDNs) plus same-origin /api/stream proxy fallback.
    */
-  static async fetchAudioBlob(song: Song): Promise<Blob | null> {
+  static async fetchAudioBlob(song: Song, outerSignal?: AbortSignal): Promise<Blob | null> {
     const rawTitle = (song.title || '').trim();
     const vidId = song.youtubeId || (song.id.startsWith('yt-') ? song.id.replace('yt-', '') : song.id);
 
     const normalizeAudioBlob = (blob: Blob, contentType?: string | null): Blob | null => {
       if (!blob || blob.size <= 50000) return null;
-      const mime = blob.type && blob.type !== 'application/octet-stream' ? blob.type : (contentType || 'audio/mp4');
-      if (mime.includes('json') || mime.includes('html') || mime.includes('text')) return null;
-      return blob.type === mime ? blob : new Blob([blob], { type: mime });
+      const rawMime = (blob.type && blob.type !== 'application/octet-stream' ? blob.type : contentType || 'audio/mp4')
+        .split(';')[0]
+        .trim()
+        .toLowerCase();
+      if (!rawMime || rawMime.includes('json') || rawMime.includes('html') || rawMime.includes('text') || rawMime.includes('xml')) {
+        return null;
+      }
+      return blob.type === rawMime ? blob : new Blob([blob], { type: rawMime });
     };
 
-    const withTimeout = (ms: number) => {
+    const fetchWithAbort = async (url: string, init: RequestInit, timeoutMs: number): Promise<Response> => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const onOuterAbort = () => controller.abort();
+      if (outerSignal) {
+        if (outerSignal.aborted) {
+          clearTimeout(timer);
+          controller.abort();
+        } else {
+          outerSignal.addEventListener('abort', onOuterAbort, { once: true });
+        }
+      }
       try {
-        return AbortSignal.timeout(ms);
-      } catch {
-        return undefined;
+        return await fetch(url, { ...init, signal: controller.signal });
+      } finally {
+        clearTimeout(timer);
+        if (outerSignal) {
+          outerSignal.removeEventListener('abort', onOuterAbort);
+        }
       }
     };
 
-    // 1. Direct streamUrl fetch (cache: 'no-store' avoids stalling on <audio>'s partial range HTTP cache lock!)
+    // 1. Direct CORS download from resolved streamUrl (no cache: 'no-store' on cross-origin!)
     const streamUrl = await this.resolveStreamUrl(song, false);
+    if (outerSignal?.aborted) return null;
+
     if (streamUrl && !streamUrl.startsWith('/api/stream')) {
       try {
-        const resp = await fetch(streamUrl, {
-          mode: 'cors',
-          cache: 'no-store',
-          signal: withTimeout(22000),
-        });
+        // For unsigned Saavn CDN URLs, append _cb to bypass Chrome's <audio> range cache lock
+        // while keeping it a simple CORS GET (no OPTIONS preflight!)
+        const isSaavnCdn = streamUrl.includes('saavncdn.com');
+        const directFetchUrl = isSaavnCdn
+          ? `${streamUrl}${streamUrl.includes('?') ? '&' : '?'}_cb=${Date.now()}`
+          : streamUrl;
+
+        const resp = await fetchWithAbort(
+          directFetchUrl,
+          { mode: 'cors' },
+          25000
+        );
         if (resp.ok) {
           const rawBlob = await resp.blob();
           const validBlob = normalizeAudioBlob(rawBlob, resp.headers.get('Content-Type'));
           if (validBlob) return validBlob;
         }
       } catch {
-        // Fall through to server proxy
+        // Fall through to same-origin server proxy
       }
     }
 
-    // 2. Fetch via internal server proxy (same-origin, bypasses CORS & SW cloning, auto-refreshes stale URLs)
-    try {
-      const proxyUrl = `/api/stream?title=${encodeURIComponent(rawTitle)}&artist=${encodeURIComponent(song.artist || '')}&id=${encodeURIComponent(vidId)}&duration=${song.duration || 0}&download=1&refresh=1`;
-      const resp = await fetch(proxyUrl, {
-        cache: 'no-store',
-        signal: withTimeout(25000),
-      });
-      if (resp.ok) {
-        const rawBlob = await resp.blob();
-        const validBlob = normalizeAudioBlob(rawBlob, resp.headers.get('Content-Type'));
-        if (validBlob) return validBlob;
+    if (outerSignal?.aborted) return null;
+
+    // 2. Fetch via same-origin server proxy (bypasses CORS & SW cloning; preserves server streamCache first)
+    const directParam =
+      streamUrl && streamUrl.startsWith('https://')
+        ? `&directUrl=${encodeURIComponent(streamUrl)}`
+        : '';
+    const baseProxyUrl = `/api/stream?title=${encodeURIComponent(rawTitle)}&artist=${encodeURIComponent(song.artist || '')}&id=${encodeURIComponent(vidId)}&duration=${song.duration || 0}&download=1${directParam}`;
+
+    for (const suffix of ['', '&refresh=1']) {
+      if (outerSignal?.aborted) return null;
+      try {
+        const resp = await fetchWithAbort(
+          `${baseProxyUrl}${suffix}`,
+          { cache: 'no-store' },
+          35000
+        );
+        if (resp.ok) {
+          const rawBlob = await resp.blob();
+          const validBlob = normalizeAudioBlob(rawBlob, resp.headers.get('Content-Type'));
+          if (validBlob) return validBlob;
+        }
+      } catch {
+        // try refresh pass if first pass failed
       }
-    } catch {
-      // ignore
     }
 
     return null;
