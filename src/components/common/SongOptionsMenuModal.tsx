@@ -40,6 +40,7 @@ export const SongOptionsMenuModal: React.FC = () => {
     setIsEqualizerOpen,
     setIsSleepTimerOpen,
     setIsSongInfoOpen,
+    getSongCoverUrl,
     themeColors,
     hapticFeedback,
     showToast,
@@ -195,7 +196,7 @@ export const SongOptionsMenuModal: React.FC = () => {
         <div className="flex items-center justify-between border-b border-white/10 pb-3">
           <div className="flex items-center gap-3 min-w-0 flex-1">
             <div className="w-12 h-12 rounded-2xl overflow-hidden shrink-0 shadow-md">
-              <img src={song.thumbnailUrl} alt={song.title} className="w-full h-full object-cover" />
+              <img src={getSongCoverUrl(song)} alt={song.title} className="w-full h-full object-cover" />
             </div>
             <div className="min-w-0 flex-1">
               <div className="text-sm font-extrabold truncate leading-tight text-white">{song.title}</div>

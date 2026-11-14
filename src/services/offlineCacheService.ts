@@ -10,6 +10,7 @@ export interface CachedTrackRecord {
   id: string;
   song: Song;
   audioBlob?: Blob;
+  artworkBlob?: Blob;
   cachedAt: number;
   lastAccessedAt: number;
   sizeBytes: number;
@@ -34,6 +35,7 @@ class OfflineCacheService {
   private cachedIds: Set<string> = new Set();
   private cachingIds: Set<string> = new Set();
   private inFlightCaches: Map<string, Promise<boolean>> = new Map();
+  private coverUrlCache: Map<string, string> = new Map();
   private listeners: (() => void)[] = [];
   private cachingListeners: ((ids: Set<string>) => void)[] = [];
 
@@ -44,11 +46,13 @@ class OfflineCacheService {
         this.requestPersistence().catch(() => {});
         setTimeout(() => {
           this.autoRepairCorruptedTracks().catch(() => {});
+          this.backfillMissingCovers().catch(() => {});
         }, 4000);
       });
 
       window.addEventListener('online', () => {
         this.autoRepairCorruptedTracks().catch(() => {});
+        this.backfillMissingCovers().catch(() => {});
       });
     }
   }
@@ -143,6 +147,68 @@ class OfflineCacheService {
     return this.cachingIds.has(songId);
   }
 
+  getCachedCoverUrl(songId: string): string | undefined {
+    return this.coverUrlCache.get(songId);
+  }
+
+  private ensureCoverUrl(songId: string, artworkBlob?: Blob): string | undefined {
+    const existing = this.coverUrlCache.get(songId);
+    if (existing) return existing;
+    if (artworkBlob && artworkBlob.size > 200) {
+      try {
+        const url = URL.createObjectURL(artworkBlob);
+        this.coverUrlCache.set(songId, url);
+        return url;
+      } catch {
+        return undefined;
+      }
+    }
+    return undefined;
+  }
+
+  private revokeCoverUrl(songId: string) {
+    const existing = this.coverUrlCache.get(songId);
+    if (existing) {
+      try {
+        URL.revokeObjectURL(existing);
+      } catch {}
+      this.coverUrlCache.delete(songId);
+    }
+  }
+
+  private async fetchCoverBlob(song: Song): Promise<Blob | undefined> {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return undefined;
+    const candidates: string[] = [];
+    if (song.thumbnailUrl && song.thumbnailUrl.startsWith('http')) {
+      candidates.push(song.thumbnailUrl);
+    }
+    const vidId = song.youtubeId || (song.id.startsWith('yt-') ? song.id.replace('yt-', '') : '');
+    if (vidId && !vidId.startsWith('online-') && !vidId.startsWith('local-')) {
+      const ytThumb = `https://i.ytimg.com/vi/${vidId}/hqdefault.jpg`;
+      if (!candidates.includes(ytThumb)) candidates.push(ytThumb);
+    }
+
+    for (const imgUrl of candidates) {
+      const imgCtrl = new AbortController();
+      const imgTimer = setTimeout(() => imgCtrl.abort(), 6000);
+      try {
+        const imgResp = await fetch(imgUrl, { mode: 'cors', signal: imgCtrl.signal });
+        if (imgResp.ok) {
+          const blob = await imgResp.blob();
+          const mime = (blob.type || imgResp.headers.get('content-type') || '').toLowerCase();
+          if (blob.size > 200 && (!mime || mime.startsWith('image/'))) {
+            return blob;
+          }
+        }
+      } catch {
+        // try next artwork candidate
+      } finally {
+        clearTimeout(imgTimer);
+      }
+    }
+    return undefined;
+  }
+
   async isSongCached(songId: string): Promise<boolean> {
     const db = await this.initDB();
     return new Promise((resolve) => {
@@ -230,26 +296,18 @@ class OfflineCacheService {
         }
       }
 
-      // Also cache album artwork locally if possible (5s max timeout so artwork never stalls download)
-      let artworkBlob: Blob | undefined;
-      if (song.thumbnailUrl && song.thumbnailUrl.startsWith('http') && (typeof navigator === 'undefined' || navigator.onLine)) {
-        const imgCtrl = new AbortController();
-        const imgTimer = setTimeout(() => imgCtrl.abort(), 5000);
-        try {
-          const imgResp = await fetch(song.thumbnailUrl, { signal: imgCtrl.signal });
-          if (imgResp.ok) {
-            artworkBlob = await imgResp.blob();
-          }
-        } catch {
-          // ignore
-        } finally {
-          clearTimeout(imgTimer);
-        }
+      // Also cache album artwork locally so offline mode never shows blank covers
+      let artworkBlob: Blob | undefined =
+        existingRecord?.artworkBlob && existingRecord.artworkBlob.size > 200
+          ? existingRecord.artworkBlob
+          : undefined;
+      if (!artworkBlob) {
+        artworkBlob = await this.fetchCoverBlob(song);
       }
 
       // Calculate real stored data size
       const audioSize = finalBlob.size;
-      const artworkSize = artworkBlob && artworkBlob.size > 500 ? artworkBlob.size : 0;
+      const artworkSize = artworkBlob && artworkBlob.size > 200 ? artworkBlob.size : 0;
       const sizeBytes = audioSize + artworkSize;
 
       const record: CachedTrackRecord = {
@@ -259,6 +317,7 @@ class OfflineCacheService {
           streamUrl: song.streamUrl || existingRecord?.song?.streamUrl,
         },
         audioBlob: finalBlob,
+        artworkBlob,
         cachedAt: existingRecord?.cachedAt || Date.now(),
         lastAccessedAt: Date.now(),
         sizeBytes,
@@ -274,6 +333,7 @@ class OfflineCacheService {
         req.onerror = () => reject(req.error);
       });
 
+      this.ensureCoverUrl(song.id, artworkBlob);
       this.cachedIds.add(song.id);
       this.notify();
       return true;
@@ -282,8 +342,8 @@ class OfflineCacheService {
     }
   }
 
-  // Retrieve cached track record and create a valid blob URL for offline audio playback
-  async getCachedTrackAudioUrl(songId: string): Promise<{ song: Song; audioUrl: string } | null> {
+  // Retrieve cached track record and create valid blob URLs for offline audio & cover playback
+  async getCachedTrackAudioUrl(songId: string): Promise<{ song: Song; audioUrl: string; coverUrl?: string } | null> {
     try {
       const db = await this.initDB();
       return new Promise((resolve) => {
@@ -311,9 +371,15 @@ class OfflineCacheService {
             return resolve(null);
           }
 
+          const coverUrl = this.ensureCoverUrl(songId, record.artworkBlob);
+          const hydratedSong = coverUrl
+            ? { ...record.song, thumbnailUrl: coverUrl }
+            : record.song;
+
           resolve({
-            song: record.song,
+            song: hydratedSong,
             audioUrl,
+            coverUrl,
           });
         };
 
@@ -346,6 +412,45 @@ class OfflineCacheService {
     }
   }
 
+  // Backfills missing artworkBlob for tracks cached prior to offline cover support
+  async backfillMissingCovers(): Promise<void> {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+    try {
+      const all = await this.getAllCachedSongs();
+      const missingCovers = all.filter(
+        (r) => r.audioBlob && r.audioBlob.size > 1000 && (!r.artworkBlob || r.artworkBlob.size <= 200)
+      );
+      if (missingCovers.length === 0) return;
+
+      const db = await this.initDB();
+      let updatedAny = false;
+      for (const item of missingCovers.slice(0, 8)) {
+        if (typeof navigator !== 'undefined' && !navigator.onLine) break;
+        const artworkBlob = await this.fetchCoverBlob(item.song);
+        if (!artworkBlob) continue;
+        const updatedRecord: CachedTrackRecord = {
+          ...item,
+          artworkBlob,
+          sizeBytes: (item.audioBlob?.size || 0) + artworkBlob.size,
+        };
+        await new Promise<void>((resolve, reject) => {
+          const tx = db.transaction(STORE_SONGS, 'readwrite');
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+          tx.onabort = () => reject(tx.error);
+          tx.objectStore(STORE_SONGS).put(updatedRecord);
+        }).catch(() => {});
+        this.ensureCoverUrl(item.id, artworkBlob);
+        updatedAny = true;
+      }
+      if (updatedAny) {
+        this.notify();
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   async getAllCachedSongs(): Promise<CachedTrackRecord[]> {
     try {
       const db = await this.initDB();
@@ -356,6 +461,11 @@ class OfflineCacheService {
         req.onsuccess = () => {
           const results = (req.result || []) as CachedTrackRecord[];
           results.sort((a, b) => b.cachedAt - a.cachedAt);
+          for (const rec of results) {
+            if (rec.artworkBlob) {
+              this.ensureCoverUrl(rec.id, rec.artworkBlob);
+            }
+          }
           resolve(results);
         };
         req.onerror = () => resolve([]);
@@ -375,6 +485,7 @@ class OfflineCacheService {
         req.onsuccess = () => resolve();
         req.onerror = () => reject(req.error);
       });
+      this.revokeCoverUrl(songId);
       this.cachedIds.delete(songId);
       this.notify();
       return true;
@@ -393,6 +504,9 @@ class OfflineCacheService {
         req.onsuccess = () => resolve();
         req.onerror = () => reject(req.error);
       });
+      for (const songId of Array.from(this.coverUrlCache.keys())) {
+        this.revokeCoverUrl(songId);
+      }
       this.cachedIds.clear();
       this.notify();
       return true;

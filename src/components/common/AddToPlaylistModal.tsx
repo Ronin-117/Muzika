@@ -11,6 +11,8 @@ export const AddToPlaylistModal: React.FC = () => {
     createPlaylist,
     themeColors,
     hapticFeedback,
+    getSongCoverUrl,
+    isSongCached,
   } = useMusic();
 
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -63,7 +65,7 @@ export const AddToPlaylistModal: React.FC = () => {
         <div className="flex items-center gap-3 p-3 rounded-2xl bg-white/5 border border-white/5">
           <div className="w-12 h-12 rounded-xl overflow-hidden shrink-0 shadow-md">
             <img
-              src={addToPlaylistTargetSong.thumbnailUrl}
+              src={getSongCoverUrl(addToPlaylistTargetSong)}
               alt={addToPlaylistTargetSong.title}
               className="w-full h-full object-cover"
             />
@@ -143,6 +145,8 @@ export const AddToPlaylistModal: React.FC = () => {
           ) : (
             playlists.map((pl) => {
               const containsSong = pl.songs.some((s) => s.id === addToPlaylistTargetSong.id);
+              const cachedInPl = pl.songs.find((s) => isSongCached(s.id));
+              const plCover = (cachedInPl ? getSongCoverUrl(cachedInPl) : '') || pl.coverUrl;
               return (
                 <div
                   key={pl.id}
@@ -154,8 +158,8 @@ export const AddToPlaylistModal: React.FC = () => {
                 >
                   <div className="flex items-center gap-3 min-w-0 flex-1">
                     <div className="w-10 h-10 rounded-xl overflow-hidden shrink-0 shadow-md bg-white/5 flex items-center justify-center">
-                      {pl.coverUrl ? (
-                        <img src={pl.coverUrl} alt={pl.title} className="w-full h-full object-cover" />
+                      {plCover ? (
+                        <img src={plCover} alt={pl.title} className="w-full h-full object-cover" />
                       ) : (
                         <Music className="w-5 h-5 opacity-40" />
                       )}

@@ -31,6 +31,7 @@ export const HomeScreen: React.FC = () => {
     cachedTracks,
     importedArtists,
     savedArtists,
+    getSongCoverUrl,
     setSongOptionsMenuTarget,
   } = useMusic();
   const { isInstalled } = usePWAInstall();
@@ -166,7 +167,7 @@ export const HomeScreen: React.FC = () => {
                     className="p-2.5 rounded-2xl bg-white/5 hover:bg-white/10 transition border border-white/5 cursor-pointer flex items-center gap-2.5 group relative overflow-hidden"
                   >
                     <div className="relative w-12 h-12 rounded-xl overflow-hidden shrink-0 shadow-md">
-                      <img src={song.thumbnailUrl} alt={song.title} className="w-full h-full object-cover" />
+                      <img src={getSongCoverUrl(song)} alt={song.title} className="w-full h-full object-cover" />
                       <div className="absolute inset-0 bg-black/30 group-hover:bg-black/50 transition flex items-center justify-center">
                         <Play
                           className={`w-5 h-5 fill-white text-white transition transform ${
@@ -279,7 +280,7 @@ export const HomeScreen: React.FC = () => {
                         {idx + 1}
                       </span>
                       <div className="relative w-11 h-11 rounded-xl overflow-hidden shrink-0 shadow-md">
-                        <img src={song.thumbnailUrl} alt={song.title} className="w-full h-full object-cover" />
+                        <img src={getSongCoverUrl(song)} alt={song.title} className="w-full h-full object-cover" />
                         <div className="absolute inset-0 bg-black/30 group-hover:bg-black/50 flex items-center justify-center transition">
                           <Play
                             className={`w-5 h-5 fill-white text-white ${

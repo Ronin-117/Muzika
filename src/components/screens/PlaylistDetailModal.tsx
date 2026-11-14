@@ -35,6 +35,7 @@ export const PlaylistDetailModal: React.FC = () => {
     cacheSongsBatch,
     cancelBatchCache,
     addPlaylistToQueue,
+    getSongCoverUrl,
     setSongOptionsMenuTarget,
   } = useMusic();
 
@@ -92,7 +93,11 @@ export const PlaylistDetailModal: React.FC = () => {
         <div className="flex flex-col items-center text-center space-y-3">
           <div className="w-44 h-44 rounded-3xl overflow-hidden shadow-2xl border border-white/10">
             <img
-              src={selectedPlaylist.coverUrl || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=600&auto=format&fit=crop&q=80'}
+              src={
+                (cachedSongsInPlaylist[0] ? getSongCoverUrl(cachedSongsInPlaylist[0]) : '') ||
+                selectedPlaylist.coverUrl ||
+                'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=600&auto=format&fit=crop&q=80'
+              }
               alt={selectedPlaylist.title}
               className="w-full h-full object-cover"
             />
@@ -314,7 +319,7 @@ export const PlaylistDetailModal: React.FC = () => {
                     <div className="flex items-center gap-3 min-w-0 flex-1">
                       <span className="text-xs font-mono opacity-40 w-4 text-center">{idx + 1}</span>
                       <div className="relative w-10 h-10 rounded-lg overflow-hidden shrink-0">
-                        <img src={song.thumbnailUrl} alt={song.title} className="w-full h-full object-cover" />
+                        <img src={getSongCoverUrl(song)} alt={song.title} className="w-full h-full object-cover" />
                         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
                           <Play className="w-4 h-4 fill-white" />
                         </div>

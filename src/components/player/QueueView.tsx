@@ -19,6 +19,7 @@ export const QueueView: React.FC = () => {
     createQueue,
     renameQueue,
     deleteQueue,
+    getSongCoverUrl,
     setSongOptionsMenuTarget,
   } = useMusic();
 
@@ -170,7 +171,7 @@ export const QueueView: React.FC = () => {
 
                 {/* Cover Art */}
                 <div className="relative w-10 h-10 rounded-xl overflow-hidden shrink-0 shadow-md">
-                  <img src={song.thumbnailUrl} alt={song.title} className="w-full h-full object-cover" />
+                  <img src={getSongCoverUrl(song)} alt={song.title} className="w-full h-full object-cover" />
                   {isCurrent && (
                     <div
                       className="absolute inset-0 bg-black/40 backdrop-blur-[1px] flex items-center justify-center"

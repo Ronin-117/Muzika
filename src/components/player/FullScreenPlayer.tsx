@@ -60,6 +60,7 @@ export const FullScreenPlayer: React.FC = () => {
     hapticFeedback,
     isSongCached,
     isSongCaching,
+    getSongCoverUrl,
     cacheSong,
     removeCachedSong,
     setAddToPlaylistTargetSong,
@@ -152,7 +153,7 @@ export const FullScreenPlayer: React.FC = () => {
                 {/* Center Label / Cover Art */}
                 <div className="relative w-36 h-36 sm:w-40 sm:h-40 rounded-full overflow-hidden shadow-inner border-2 border-white/20">
                   <img
-                    src={currentSong.thumbnailUrl}
+                    src={getSongCoverUrl(currentSong)}
                     alt={currentSong.title}
                     className="w-full h-full object-cover"
                   />

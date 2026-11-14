@@ -156,6 +156,7 @@ interface MusicContextType {
   cachedTracks: CachedTrackRecord[];
   isSongCached: (songId: string) => boolean;
   isSongCaching: (songId: string) => boolean;
+  getSongCoverUrl: (song?: { id?: string; thumbnailUrl?: string } | null) => string;
   cacheSong: (song: Song, audioBlob?: Blob, silent?: boolean) => Promise<boolean>;
   removeCachedSong: (songId: string) => Promise<boolean>;
   clearOfflineCache: () => Promise<boolean>;
@@ -291,9 +292,12 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [blacklist, setBlacklist] = useState(() => StorageService.getBlacklist());
   const [userStats, setUserStats] = useState<UserStats>(() => StorageService.getUserStats());
   const [equalizerSettings, setEqSettings] = useState<EqualizerSettings>(() => StorageService.getEqualizer());
+  const equalizerSettingsRef = useRef<EqualizerSettings>(equalizerSettings);
+  equalizerSettingsRef.current = equalizerSettings;
 
-  // Real-time Web Audio API DSP Equalizer synchronization
+  // Real-time Web Audio API DSP Equalizer synchronization (stores settings even before Audio mounts)
   useEffect(() => {
+    webAudioEqualizer.applySettings(equalizerSettings);
     if (htmlAudioRef.current) {
       webAudioEqualizer.init(htmlAudioRef.current);
       webAudioEqualizer.applySettings(equalizerSettings);
@@ -806,11 +810,13 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   // Initialize Audio element for native high-fidelity background and screen-off playback (Mounted ONCE)
   useEffect(() => {
     const audio = new Audio();
+    audio.crossOrigin = 'anonymous';
     audio.preload = 'auto';
     (audio as any).playsInline = true;
     audio.setAttribute('playsinline', 'true');
     audio.setAttribute('x-webkit-airplay', 'allow');
     htmlAudioRef.current = audio;
+    webAudioEqualizer.applySettings(equalizerSettingsRef.current);
 
     const handleTimeUpdate = () => {
       if (activeEngineRef.current === 'html') {
@@ -830,7 +836,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     const handlePlay = () => {
       if (activeEngineRef.current === 'html') {
         setIsPlaying(true);
-        webAudioEqualizer.ensureActive(audio);
+        webAudioEqualizer.ensureActive(audio, equalizerSettingsRef.current);
         if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
           navigator.mediaSession.playbackState = 'playing';
         }
@@ -839,7 +845,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
     const handlePlaying = () => {
       if (activeEngineRef.current === 'html') {
-        webAudioEqualizer.ensureActive(audio);
+        webAudioEqualizer.ensureActive(audio, equalizerSettingsRef.current);
       }
     };
 
@@ -1234,13 +1240,24 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       return;
     }
 
+    // Unlock & prime WebAudio EQ synchronously on user playback gesture
+    if (htmlAudioRef.current) {
+      webAudioEqualizer.ensureActive(htmlAudioRef.current, equalizerSettingsRef.current);
+    }
+
     // 1. If cached real audio is available, play via native HTML5 <audio>
     if (cachedData && cachedData.audioUrl) {
       activeEngineRef.current = 'html';
       lastBlobUrlRef.current = cachedData.audioUrl;
+      if (cachedData.coverUrl) {
+        const hydratedSong = { ...song, thumbnailUrl: cachedData.coverUrl };
+        setCurrentSong(hydratedSong);
+        currentSongRef.current = hydratedSong;
+      }
       if (ytControllerRef.current) ytControllerRef.current.pause();
       isTransitioningRef.current = false;
       if (htmlAudioRef.current) {
+        webAudioEqualizer.ensureActive(htmlAudioRef.current, equalizerSettingsRef.current);
         htmlAudioRef.current.src = cachedData.audioUrl;
         if (startPos > 0) {
           try {
@@ -1318,6 +1335,9 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     hapticFeedback();
     userPausedRef.current = false;
     audioFocusManager.start();
+    if (htmlAudioRef.current) {
+      webAudioEqualizer.ensureActive(htmlAudioRef.current, equalizerSettingsRef.current);
+    }
 
     let newQueue: Song[];
     let targetIndex: number;
@@ -1372,6 +1392,9 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       // User explicitly requested resume
       userPausedRef.current = false;
       audioFocusManager.start();
+      if (htmlAudioRef.current) {
+        webAudioEqualizer.ensureActive(htmlAudioRef.current, equalizerSettingsRef.current);
+      }
       silentKeepAliveRef.current?.play().catch(() => {});
       const resumePos = currentTime > 0 ? currentTime : 0;
 
@@ -1698,6 +1721,15 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   const isSongCaching = (songId: string) => {
     return cachingSongIds.has(songId);
+  };
+
+  const getSongCoverUrl = (song?: { id?: string; thumbnailUrl?: string } | null): string => {
+    if (!song) return '';
+    if (song.id) {
+      const offlineCover = offlineCacheService.getCachedCoverUrl(song.id);
+      if (offlineCover) return offlineCover;
+    }
+    return song.thumbnailUrl || '';
   };
 
   const cacheSong = async (song: Song, audioBlob?: Blob, silent = false) => {
@@ -2287,6 +2319,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         cachedTracks,
         isSongCached,
         isSongCaching,
+        getSongCoverUrl,
         cacheSong,
         removeCachedSong,
         clearOfflineCache,

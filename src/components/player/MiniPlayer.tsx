@@ -13,6 +13,7 @@ export const MiniPlayer: React.FC = () => {
     toggleLike,
     isLiked,
     setIsPlayerOpen,
+    getSongCoverUrl,
     themeColors,
     hapticFeedback,
   } = useMusic();
@@ -50,7 +51,7 @@ export const MiniPlayer: React.FC = () => {
         <div className="flex items-center gap-3 overflow-hidden flex-1 min-w-0 pr-2">
           <div className="relative w-11 h-11 rounded-xl overflow-hidden shrink-0 shadow-md">
             <img
-              src={currentSong.thumbnailUrl}
+              src={getSongCoverUrl(currentSong)}
               alt={currentSong.title}
               className={`w-full h-full object-cover ${isPlaying ? 'brightness-105' : 'brightness-90'}`}
             />

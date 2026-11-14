@@ -56,6 +56,7 @@ export const LibraryScreen: React.FC = () => {
     toggleSaveAlbum,
     isAlbumSaved,
     addPlaylistToQueue,
+    getSongCoverUrl,
   } = useMusic();
 
   const [activeSubTab, setActiveSubTab] = useState<
@@ -342,7 +343,7 @@ export const LibraryScreen: React.FC = () => {
                     >
                       <div className="flex items-center gap-3 min-w-0 flex-1">
                         <div className="relative w-11 h-11 rounded-xl overflow-hidden shrink-0 shadow-md">
-                          <img src={song.thumbnailUrl} alt={song.title} className="w-full h-full object-cover" />
+                          <img src={getSongCoverUrl(song)} alt={song.title} className="w-full h-full object-cover" />
                           <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
                             <Play className="w-4 h-4 fill-white text-white" />
                           </div>
@@ -565,7 +566,7 @@ export const LibraryScreen: React.FC = () => {
                 >
                   <div className="flex items-center gap-3 min-w-0 flex-1">
                     <div className="w-10 h-10 rounded-lg overflow-hidden shrink-0">
-                      <img src={song.thumbnailUrl} alt={song.title} className="w-full h-full object-cover" />
+                      <img src={getSongCoverUrl(song)} alt={song.title} className="w-full h-full object-cover" />
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="text-sm font-semibold truncate">{song.title}</div>

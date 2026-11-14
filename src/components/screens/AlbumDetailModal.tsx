@@ -24,6 +24,7 @@ export const AlbumDetailModal: React.FC = () => {
     toggleSaveAlbum,
     isAlbumSaved,
     addPlaylistToQueue,
+    getSongCoverUrl,
   } = useMusic();
 
   const [fetchedSongs, setFetchedSongs] = useState<Song[]>([]);
@@ -318,7 +319,7 @@ export const AlbumDetailModal: React.FC = () => {
                         </span>
                         <div className="relative w-11 h-11 rounded-xl overflow-hidden shrink-0 shadow-md">
                           <img
-                            src={song.thumbnailUrl || selectedAlbum.coverUrl}
+                            src={getSongCoverUrl(song) || selectedAlbum.coverUrl}
                             alt={song.title}
                             className="w-full h-full object-cover"
                           />
