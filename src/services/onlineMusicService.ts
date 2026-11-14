@@ -284,7 +284,8 @@ export class OnlineMusicService {
     try {
       const refreshParam = forceRefresh ? '&refresh=1' : '';
       const backendUrl = `/api/stream?title=${encodeURIComponent(rawTitle)}&artist=${encodeURIComponent(song.artist || '')}&id=${encodeURIComponent(vidId)}&duration=${song.duration || 0}&json=true${refreshParam}`;
-      const res = await fetch(backendUrl);
+      const signal = typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal ? AbortSignal.timeout(12000) : undefined;
+      const res = await fetch(backendUrl, { signal });
       if (res.ok) {
         const data = await res.json();
         if (data.streamUrl) {
@@ -306,7 +307,8 @@ export class OnlineMusicService {
     if (!isUnknownArtist) {
       try {
         const term = `${cleanTitle} ${song.artist}`.trim();
-        const res = await fetch(`https://saavn-api-one.vercel.app/search/songs?query=${encodeURIComponent(term)}`);
+        const signal = typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal ? AbortSignal.timeout(8000) : undefined;
+        const res = await fetch(`https://saavn-api-one.vercel.app/search/songs?query=${encodeURIComponent(term)}`, { signal });
         if (res.ok) {
           const data = await res.json();
           const results: any[] = data.data?.results || [];
@@ -508,11 +510,23 @@ export class OnlineMusicService {
       return blob.type === mime ? blob : new Blob([blob], { type: mime });
     };
 
-    // 1. Direct streamUrl fetch (fast CDN direct download)
+    const withTimeout = (ms: number) => {
+      try {
+        return AbortSignal.timeout(ms);
+      } catch {
+        return undefined;
+      }
+    };
+
+    // 1. Direct streamUrl fetch (cache: 'no-store' avoids stalling on <audio>'s partial range HTTP cache lock!)
     const streamUrl = await this.resolveStreamUrl(song, false);
     if (streamUrl && !streamUrl.startsWith('/api/stream')) {
       try {
-        const resp = await fetch(streamUrl, { mode: 'cors' });
+        const resp = await fetch(streamUrl, {
+          mode: 'cors',
+          cache: 'no-store',
+          signal: withTimeout(22000),
+        });
         if (resp.ok) {
           const rawBlob = await resp.blob();
           const validBlob = normalizeAudioBlob(rawBlob, resp.headers.get('Content-Type'));
@@ -526,7 +540,10 @@ export class OnlineMusicService {
     // 2. Fetch via internal server proxy (same-origin, bypasses CORS & SW cloning, auto-refreshes stale URLs)
     try {
       const proxyUrl = `/api/stream?title=${encodeURIComponent(rawTitle)}&artist=${encodeURIComponent(song.artist || '')}&id=${encodeURIComponent(vidId)}&duration=${song.duration || 0}&download=1&refresh=1`;
-      const resp = await fetch(proxyUrl);
+      const resp = await fetch(proxyUrl, {
+        cache: 'no-store',
+        signal: withTimeout(25000),
+      });
       if (resp.ok) {
         const rawBlob = await resp.blob();
         const validBlob = normalizeAudioBlob(rawBlob, resp.headers.get('Content-Type'));

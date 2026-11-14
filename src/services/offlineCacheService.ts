@@ -118,9 +118,7 @@ class OfflineCacheService {
   }
 
   private notify() {
-    this.refreshCachedIds().then(() => {
-      this.listeners.forEach((l) => l());
-    });
+    this.listeners.forEach((l) => l());
   }
 
   async refreshCachedIds(): Promise<Set<string>> {
@@ -206,7 +204,10 @@ class OfflineCacheService {
         }
 
         try {
-          const downloaded = await OnlineMusicService.fetchAudioBlob(song);
+          const downloaded = await Promise.race([
+            OnlineMusicService.fetchAudioBlob(song),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 32000)),
+          ]);
           if (downloaded && downloaded.size > 1000) {
             finalBlob = downloaded;
           }
@@ -226,11 +227,12 @@ class OfflineCacheService {
         }
       }
 
-      // Also cache album artwork locally if possible
+      // Also cache album artwork locally if possible (5s max timeout so artwork never stalls download)
       let artworkBlob: Blob | undefined;
       if (song.thumbnailUrl && song.thumbnailUrl.startsWith('http') && (typeof navigator === 'undefined' || navigator.onLine)) {
         try {
-          const imgResp = await fetch(song.thumbnailUrl);
+          const imgSignal = typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal ? AbortSignal.timeout(5000) : undefined;
+          const imgResp = await fetch(song.thumbnailUrl, { signal: imgSignal });
           if (imgResp.ok) {
             artworkBlob = await imgResp.blob();
           }
@@ -259,8 +261,10 @@ class OfflineCacheService {
       await new Promise<void>((resolve, reject) => {
         const tx = db.transaction(STORE_SONGS, 'readwrite');
         const store = tx.objectStore(STORE_SONGS);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error || new Error('IndexedDB transaction failed'));
+        tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'));
         const req = store.put(record);
-        req.onsuccess = () => resolve();
         req.onerror = () => reject(req.error);
       });
 

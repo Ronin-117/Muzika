@@ -99,11 +99,7 @@ export const FullScreenPlayer: React.FC = () => {
         <button
           onClick={() => {
             hapticFeedback();
-            if (typeof window !== 'undefined' && window.history.length > 1) {
-              window.history.back();
-            } else {
-              setIsPlayerOpen(false);
-            }
+            setIsPlayerOpen(false);
           }}
           className="p-2 rounded-full hover:bg-white/10 transition text-white/80"
           title="Minimize player"

@@ -486,6 +486,9 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     selectedArtistId,
     selectedArtist,
     selectedAlbum,
+    addToPlaylistTargetSong,
+    songOptionsMenuTarget,
+    syncTargetSong,
   });
 
   useEffect(() => {
@@ -503,6 +506,9 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       selectedArtistId,
       selectedArtist,
       selectedAlbum,
+      addToPlaylistTargetSong,
+      songOptionsMenuTarget,
+      syncTargetSong,
     };
   }, [
     activeTab,
@@ -518,6 +524,9 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     selectedArtistId,
     selectedArtist,
     selectedAlbum,
+    addToPlaylistTargetSong,
+    songOptionsMenuTarget,
+    syncTargetSong,
   ]);
 
   const ensureHistoryTrap = () => {
@@ -547,7 +556,22 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         return;
       }
 
-      // 2. Modals & sheets in order of depth
+      // 2. Modals & sheets in top-most z-index order
+      if (state.syncTargetSong) {
+        setSyncTargetSong(null);
+        ensureHistoryTrap();
+        return;
+      }
+      if (state.addToPlaylistTargetSong) {
+        setAddToPlaylistTargetSong(null);
+        ensureHistoryTrap();
+        return;
+      }
+      if (state.songOptionsMenuTarget) {
+        setSongOptionsMenuTarget(null);
+        ensureHistoryTrap();
+        return;
+      }
       if (state.isSongInfoOpen) {
         setIsSongInfoOpenState(false);
         ensureHistoryTrap();
@@ -579,7 +603,14 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         return;
       }
 
-      // 3. Entity Detail screens
+      // 3. Full-screen Player sits above Entity Detail screens (z-50 > z-40)
+      if (state.isPlayerOpen) {
+        setIsPlayerOpenState(false);
+        ensureHistoryTrap();
+        return;
+      }
+
+      // 4. Entity Detail screens
       if (state.selectedPlaylist) {
         setSelectedPlaylistState(null);
         ensureHistoryTrap();
@@ -593,17 +624,6 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       }
       if (state.selectedAlbum) {
         setSelectedAlbumState(null);
-        ensureHistoryTrap();
-        return;
-      }
-
-      // 4. In app player: close player and navigate to Home screen
-      if (state.isPlayerOpen) {
-        setIsPlayerOpenState(false);
-        setActiveTabState('home');
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('muzika_active_tab', 'home');
-        }
         ensureHistoryTrap();
         return;
       }
@@ -631,27 +651,24 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   useEffect(() => {
     let isMounted = true;
-    const loadCache = async () => {
-      const ids = await offlineCacheService.refreshCachedIds();
-      if (!isMounted) return;
-      setCachedSongIds(new Set(ids));
+    const syncCacheState = async (includeConfig = false) => {
       const all = await offlineCacheService.getAllCachedSongs();
+      if (!isMounted) return;
+      const validIds = all.filter((s) => s.audioBlob && s.audioBlob.size > 1000).map((s) => s.id);
+      setCachedSongIds(new Set(validIds));
       setCachedTracks(all);
-      const est = await offlineCacheService.getStorageEstimate();
-      setStorageEstimate(est);
-      const cfg = await offlineCacheService.getCacheConfig();
-      setCacheConfigState(cfg);
+      const totalBytes = all.reduce((sum, item) => sum + (item.sizeBytes || 0), 0);
+      setStorageEstimate({ totalBytes, count: all.length });
+      if (includeConfig) {
+        const cfg = await offlineCacheService.getCacheConfig();
+        if (isMounted) setCacheConfigState(cfg);
+      }
     };
-    loadCache();
 
-    const unsub = offlineCacheService.subscribe(async () => {
-      if (!isMounted) return;
-      const ids = await offlineCacheService.refreshCachedIds();
-      setCachedSongIds(new Set(ids));
-      const all = await offlineCacheService.getAllCachedSongs();
-      setCachedTracks(all);
-      const est = await offlineCacheService.getStorageEstimate();
-      setStorageEstimate(est);
+    syncCacheState(true);
+
+    const unsub = offlineCacheService.subscribe(() => {
+      syncCacheState(false);
     });
 
     const unsubCaching = offlineCacheService.subscribeCaching((ids) => {
@@ -687,6 +704,14 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const isPlayingRef = useRef<boolean>(isPlaying);
   isPlayingRef.current = isPlaying;
   const userPausedRef = useRef<boolean>(false);
+  const isTransitioningRef = useRef<boolean>(false);
+  const playRequestIdRef = useRef<number>(0);
+  const lastBlobUrlRef = useRef<string | null>(null);
+  const preloadTimerRef = useRef<number | null>(null);
+  const handleTrackEndedRef = useRef<() => void>(() => {});
+  const playIndexRef = useRef<
+    (index: number, startAtSecond?: number, overrideQueue?: Song[], overrideSong?: Song) => Promise<void>
+  >(async () => {});
 
   useEffect(() => {
     if (theme === 'dynamic') {
@@ -739,12 +764,13 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   // Handle visibilitychange safeguard (prevent mobile OS from throttling background playback)
   useEffect(() => {
     const handleVisibilityChange = () => {
-      if (isPlayingRef.current && !userPausedRef.current) {
+      if (isPlayingRef.current && !userPausedRef.current && !isTransitioningRef.current) {
         audioFocusManager.start();
         silentKeepAliveRef.current?.play().catch(() => {});
         if (activeEngineRef.current === 'html' && htmlAudioRef.current) {
-          if (htmlAudioRef.current.paused) {
-            htmlAudioRef.current.play().catch(() => {});
+          const audio = htmlAudioRef.current;
+          if (audio.paused && !audio.ended && !!(audio.currentSrc || audio.src)) {
+            audio.play().catch(() => {});
           }
         } else if (activeEngineRef.current === 'youtube') {
           ytControllerRef.current?.play();
@@ -796,8 +822,8 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     };
 
     const handleEnded = () => {
-      if (activeEngineRef.current === 'html') {
-        handleTrackEnded();
+      if (activeEngineRef.current === 'html' && !isTransitioningRef.current) {
+        handleTrackEndedRef.current();
       }
     };
 
@@ -819,10 +845,14 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
     const handlePause = () => {
       if (activeEngineRef.current === 'html') {
+        if (isTransitioningRef.current) {
+          return;
+        }
         if (!userPausedRef.current && isPlayingRef.current) {
-          // Unintended pause event fired by mobile OS or Chrome tab backgrounding
-          if (htmlAudioRef.current && htmlAudioRef.current.paused) {
-            htmlAudioRef.current.play().catch(() => {});
+          const curAudio = htmlAudioRef.current;
+          // Only resume unintended OS/background pause if track hasn't ended and has an active source
+          if (curAudio && curAudio.paused && !curAudio.ended && !!(curAudio.currentSrc || curAudio.src)) {
+            curAudio.play().catch(() => {});
           }
           return;
         }
@@ -875,6 +905,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         }
         // -1: unstarted, 0: ended, 1: playing, 2: paused, 3: buffering, 5: video cued
         if (activeEngineRef.current === 'youtube') {
+          if (isTransitioningRef.current) return;
           if (state === 1) {
             setIsPlaying(true);
             userPausedRef.current = false;
@@ -893,7 +924,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
               navigator.mediaSession.playbackState = 'paused';
             }
           } else if (state === 0) {
-            handleTrackEnded();
+            handleTrackEndedRef.current();
           }
         }
       },
@@ -1054,6 +1085,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   // Handle track completion
   const handleTrackEnded = () => {
+    if (isTransitioningRef.current) return;
     const curRepeat = repeatModeRef.current;
     const curQueue = queueRef.current;
     const curIndex = queueIndexRef.current;
@@ -1070,13 +1102,14 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     }
 
     if (curIndex < curQueue.length - 1) {
-      playIndex(curIndex + 1);
+      playIndexRef.current(curIndex + 1);
     } else if (curRepeat === 'all') {
-      playIndex(0);
+      playIndexRef.current(0);
     } else {
       setIsPlaying(false);
     }
   };
+  handleTrackEndedRef.current = handleTrackEnded;
 
   // Record playback stats
   const recordPlay = (song: Song) => {
@@ -1123,6 +1156,11 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   const playIndex = async (index: number, startAtSecond?: number, overrideQueue?: Song[], overrideSong?: Song) => {
     stopPreviewCandidate();
+    if (preloadTimerRef.current) {
+      window.clearTimeout(preloadTimerRef.current);
+      preloadTimerRef.current = null;
+    }
+
     const activeQueue = overrideQueue || queueRef.current;
     if (index < 0 || index >= activeQueue.length) return;
     const rawSong = overrideSong || activeQueue[index];
@@ -1137,8 +1175,32 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       }
     }
 
+    const reqId = ++playRequestIdRef.current;
+    isTransitioningRef.current = true;
     userPausedRef.current = false;
     audioFocusManager.start();
+
+    // Immediately pause and detach the previous track's audio source BEFORE async resolution
+    // so an ended HTML5 <audio> buffer can NEVER replay the previous song during transitions
+    if (ytControllerRef.current) {
+      try {
+        ytControllerRef.current.pause();
+      } catch {}
+    }
+    if (htmlAudioRef.current) {
+      try {
+        htmlAudioRef.current.pause();
+        htmlAudioRef.current.removeAttribute('src');
+        htmlAudioRef.current.load();
+      } catch {}
+    }
+    if (lastBlobUrlRef.current) {
+      try {
+        URL.revokeObjectURL(lastBlobUrlRef.current);
+      } catch {}
+      lastBlobUrlRef.current = null;
+    }
+
     const startPos = typeof startAtSecond === 'number' ? startAtSecond : 0;
     setQueue(activeQueue);
     queueRef.current = activeQueue;
@@ -1151,22 +1213,35 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     setIsPlaying(true);
     recordPlay(song);
 
-    // Stop YouTube player if running
-    if (ytControllerRef.current) {
-      ytControllerRef.current.pause();
-    }
-
     // Check if track has a cached real audio blob in IndexedDB
     const cachedData = await offlineCacheService.getCachedTrackAudioUrl(song.id);
+    if (playRequestIdRef.current !== reqId) {
+      if (cachedData?.audioUrl) {
+        try {
+          URL.revokeObjectURL(cachedData.audioUrl);
+        } catch {}
+      }
+      return;
+    }
+    if (userPausedRef.current) {
+      isTransitioningRef.current = false;
+      if (cachedData?.audioUrl) {
+        try {
+          URL.revokeObjectURL(cachedData.audioUrl);
+        } catch {}
+      }
+      setIsPlaying(false);
+      return;
+    }
 
     // 1. If cached real audio is available, play via native HTML5 <audio>
     if (cachedData && cachedData.audioUrl) {
       activeEngineRef.current = 'html';
+      lastBlobUrlRef.current = cachedData.audioUrl;
       if (ytControllerRef.current) ytControllerRef.current.pause();
+      isTransitioningRef.current = false;
       if (htmlAudioRef.current) {
-        if (htmlAudioRef.current.src !== cachedData.audioUrl) {
-          htmlAudioRef.current.src = cachedData.audioUrl;
-        }
+        htmlAudioRef.current.src = cachedData.audioUrl;
         if (startPos > 0) {
           try {
             htmlAudioRef.current.currentTime = startPos;
@@ -1178,13 +1253,18 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     } else {
       // 2. Resolve direct 320kbps full-length audio stream URL
       const directStreamUrl = await OnlineMusicService.resolveStreamUrl(song);
+      if (playRequestIdRef.current !== reqId) return;
+      if (userPausedRef.current) {
+        isTransitioningRef.current = false;
+        setIsPlaying(false);
+        return;
+      }
 
+      isTransitioningRef.current = false;
       if (directStreamUrl && htmlAudioRef.current) {
         activeEngineRef.current = 'html';
         if (ytControllerRef.current) ytControllerRef.current.pause();
-        if (htmlAudioRef.current.src !== directStreamUrl) {
-          htmlAudioRef.current.src = directStreamUrl;
-        }
+        htmlAudioRef.current.src = directStreamUrl;
         if (startPos > 0) {
           try {
             htmlAudioRef.current.currentTime = startPos;
@@ -1205,6 +1285,19 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       }
     }
 
+    // Pre-resolve next queued track's stream URL in background so track changes are instantaneous
+    const nextRawSong = activeQueue[index + 1];
+    if (nextRawSong && (typeof navigator === 'undefined' || navigator.onLine)) {
+      const nextSong = StorageService.applySongSyncOverride(nextRawSong);
+      if (!nextSong.streamUrl && !offlineCacheService.isCachedSync(nextSong.id)) {
+        preloadTimerRef.current = window.setTimeout(() => {
+          if (playRequestIdRef.current === reqId) {
+            OnlineMusicService.resolveStreamUrl(nextSong).catch(() => {});
+          }
+        }, 1500);
+      }
+    }
+
     // Auto-cache real audio stream in background ONLY if enabled, device is online, and song is not already cached
     const isAlreadyCached = !!(cachedData && cachedData.audioUrl);
     const isOnline = typeof navigator === 'undefined' || navigator.onLine;
@@ -1212,6 +1305,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       offlineCacheService.cacheSong(song).catch(() => {});
     }
   };
+  playIndexRef.current = playIndex;
 
   const playSong = (song: Song, customQueue?: Song[]) => {
     hapticFeedback();

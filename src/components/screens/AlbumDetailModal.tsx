@@ -70,11 +70,7 @@ export const AlbumDetailModal: React.FC = () => {
 
   const handleBack = () => {
     hapticFeedback();
-    if (typeof window !== 'undefined' && window.history.length > 1) {
-      window.history.back();
-    } else {
-      setSelectedAlbum(null);
-    }
+    setSelectedAlbum(null);
   };
 
   const handlePlayAll = (shuffle = false) => {

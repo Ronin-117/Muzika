@@ -69,12 +69,8 @@ export const ArtistDetailModal: React.FC = () => {
 
   const handleBack = () => {
     hapticFeedback();
-    if (typeof window !== 'undefined' && window.history.length > 1) {
-      window.history.back();
-    } else {
-      setSelectedArtistId(null);
-      setSelectedArtist(null);
-    }
+    setSelectedArtistId(null);
+    setSelectedArtist(null);
   };
 
   return (

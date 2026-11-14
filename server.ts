@@ -693,13 +693,19 @@ app.get('/api/stream', async (req: Request, res: Response) => {
         }
       }
 
-      // 2. Direct YouTube Music stream resolution via InnerTube if vidId exists
+      // 2. Direct YouTube Music stream resolution via InnerTube if vidId exists (6s fast timeout)
       if (!resolvedUrl && vidId && !vidId.startsWith('online-') && !vidId.startsWith('local-')) {
         try {
-          const yt = await getInnertube();
+          const yt = await Promise.race([
+            getInnertube(),
+            new Promise<never>((_, rej) => setTimeout(() => rej(new Error('Innertube timeout')), 4500)),
+          ]);
           for (const client of ['IOS', 'ANDROID', 'WEB'] as const) {
             try {
-              const info = await yt.getBasicInfo(vidId, { client });
+              const info = await Promise.race([
+                yt.getBasicInfo(vidId, { client }),
+                new Promise<never>((_, rej) => setTimeout(() => rej(new Error('getBasicInfo timeout')), 3500)),
+              ]);
               const format = info.chooseFormat({ quality: 'best', type: 'audio' });
               if (format) {
                 const deciphered = format.url || (await format.decipher(yt.session.player));
@@ -718,11 +724,14 @@ app.get('/api/stream', async (req: Request, res: Response) => {
         }
       }
 
-      // 3. Fallback: @distube/ytdl-core extraction (works cleanly on residential/self-hosted IPs)
+      // 3. Fallback: @distube/ytdl-core extraction (works cleanly on residential/self-hosted IPs, 5s timeout)
       if (!resolvedUrl && vidId && !vidId.startsWith('online-') && !vidId.startsWith('local-')) {
         try {
           const ytdl = getYtdl();
-          const info = await ytdl.getInfo(vidId);
+          const info = await Promise.race([
+            ytdl.getInfo(vidId),
+            new Promise<never>((_, rej) => setTimeout(() => rej(new Error('ytdl timeout')), 5000)),
+          ]);
           const format = chooseFormat(info.formats, {
             quality: 'highestaudio',
             filter: (f) => f.hasAudio && !f.hasVideo,
@@ -732,7 +741,7 @@ app.get('/api/stream', async (req: Request, res: Response) => {
             mimeType = format.mimeType?.split(';')[0] || 'audio/mp4';
           }
         } catch {
-          // ignore if YouTube blocks datacenter IP
+          // ignore if YouTube blocks datacenter IP or times out
         }
       }
 
@@ -757,13 +766,17 @@ app.get('/api/stream', async (req: Request, res: Response) => {
         fetchHeaders['Range'] = range;
       }
 
-      const streamResp = await fetch(streamInfo.url, { headers: fetchHeaders });
+      const streamResp = await fetch(streamInfo.url, {
+        headers: fetchHeaders,
+        signal: AbortSignal.timeout(22000),
+      });
       if (streamResp.ok || streamResp.status === 206) {
         const statusCode = range || streamResp.status === 206 ? 206 : streamResp.status;
         res.status(statusCode);
         res.setHeader('Content-Type', streamInfo.mimeType || 'audio/mp4');
         res.setHeader('Accept-Ranges', 'bytes');
-        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        const isDownload = req.query.download === '1' || req.query.refresh === '1';
+        res.setHeader('Cache-Control', isDownload ? 'no-store' : 'public, max-age=3600');
 
         const contentRange = streamResp.headers.get('content-range');
         if (contentRange) res.setHeader('Content-Range', contentRange);
@@ -773,6 +786,9 @@ app.get('/api/stream', async (req: Request, res: Response) => {
 
         if (streamResp.body) {
           const reader = streamResp.body.getReader();
+          req.on('close', () => {
+            reader.cancel().catch(() => {});
+          });
           const pump = async () => {
             while (true) {
               const { done, value } = await reader.read();
@@ -783,9 +799,11 @@ app.get('/api/stream', async (req: Request, res: Response) => {
                 break;
               }
             }
-            res.end();
+            if (!res.writableEnded) res.end();
           };
-          pump().catch(() => res.end());
+          pump().catch(() => {
+            if (!res.writableEnded) res.end();
+          });
           return;
         }
       } else {
