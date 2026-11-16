@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useMusic } from '../../context/MusicContext';
+import { useMusic, usePlaybackTime } from '../../context/MusicContext';
 import { Song } from '../../types/music';
 import {
   FlaskConical,
@@ -58,8 +58,6 @@ export const TestScreen: React.FC = () => {
   const {
     currentSong,
     isPlaying,
-    currentTime,
-    duration,
     playSong,
     togglePlay,
     themeColors,
@@ -67,6 +65,7 @@ export const TestScreen: React.FC = () => {
     likedSongs,
     history,
   } = useMusic();
+  const { currentTime, duration } = usePlaybackTime();
 
   const testSongsList = useMemo(() => {
     const list = [...likedSongs, ...history];

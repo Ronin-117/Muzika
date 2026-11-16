@@ -53,6 +53,13 @@ function OfflineBanner() {
 
 function MuzikaApp() {
   const { activeTab, themeColors, isPlayerOpen, playerMode, isRiplayImportOpen, setIsRiplayImportOpen } = useMusic();
+  const [hasVisitedSearch, setHasVisitedSearch] = useState(activeTab === 'search');
+
+  useEffect(() => {
+    if (activeTab === 'search' && !hasVisitedSearch) {
+      setHasVisitedSearch(true);
+    }
+  }, [activeTab, hasVisitedSearch]);
 
   return (
     <div
@@ -69,7 +76,11 @@ function MuzikaApp() {
         <ErrorBoundary>
           {activeTab === 'home' && <HomeScreen />}
           {activeTab === 'explore' && <ExploreScreen />}
-          {activeTab === 'search' && <SearchScreen />}
+          {hasVisitedSearch && (
+            <div className={activeTab === 'search' ? 'block' : 'hidden'}>
+              <SearchScreen />
+            </div>
+          )}
           {activeTab === 'library' && <LibraryScreen />}
           {activeTab === 'rewind' && <RewindScreen />}
           {activeTab === 'settings' && <SettingsScreen />}

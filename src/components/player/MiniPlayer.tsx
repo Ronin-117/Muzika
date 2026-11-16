@@ -1,13 +1,11 @@
 import React from 'react';
-import { useMusic } from '../../context/MusicContext';
+import { useMusic, usePlaybackTime } from '../../context/MusicContext';
 import { Play, Pause, SkipForward, Heart } from 'lucide-react';
 
 export const MiniPlayer: React.FC = () => {
   const {
     currentSong,
     isPlaying,
-    currentTime,
-    duration,
     togglePlay,
     nextTrack,
     toggleLike,
@@ -17,6 +15,7 @@ export const MiniPlayer: React.FC = () => {
     themeColors,
     hapticFeedback,
   } = useMusic();
+  const { currentTime, duration } = usePlaybackTime();
 
   if (!currentSong) return null;
 

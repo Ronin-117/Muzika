@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, memo } from 'react';
 import { useMusic } from '../../context/MusicContext';
 import { ListPlus, CornerDownRight, Check } from 'lucide-react';
 import { Song } from '../../types/music';
@@ -11,7 +11,13 @@ interface SwipeableSongRowProps {
   disabled?: boolean;
 }
 
-export const SwipeableSongRow: React.FC<SwipeableSongRowProps> = ({
+const SWIPE_THRESHOLD = 52;
+const FLICK_MIN_DISTANCE = 28;
+const FLICK_MAX_MS = 240;
+const FLICK_MIN_VELOCITY = 0.32;
+const MAX_OFFSET = 114;
+
+export const SwipeableSongRow: React.FC<SwipeableSongRowProps> = memo(({
   song,
   children,
   onSwipeAdd,
@@ -19,15 +25,24 @@ export const SwipeableSongRow: React.FC<SwipeableSongRowProps> = ({
   disabled = false,
 }) => {
   const { addToQueue, playNextInQueue, setSongOptionsMenuTarget, hapticFeedback } = useMusic();
-  const [translateX, setTranslateX] = useState(0);
-  const [isSwiping, setIsSwiping] = useState(false);
   const [addedMode, setAddedMode] = useState<'next' | 'end' | null>(null);
+
+  const foregroundRef = useRef<HTMLDivElement | null>(null);
+  const bgRef = useRef<HTMLDivElement | null>(null);
+  const leftLabelRef = useRef<HTMLDivElement | null>(null);
+  const rightLabelRef = useRef<HTMLDivElement | null>(null);
 
   const startXRef = useRef(0);
   const startYRef = useRef(0);
+  const startTimeRef = useRef(0);
+  const dragOffsetRef = useRef(0);
+  const isTrackingRef = useRef(false);
   const isHorizontalSwipeRef = useRef<boolean | null>(null);
+  const thresholdHapticFiredRef = useRef(false);
+  const wasDraggedRef = useRef(false);
   const longPressTimerRef = useRef<number | null>(null);
   const isLongPressRef = useRef<boolean>(false);
+  const flashTimerRef = useRef<number | null>(null);
 
   const clearLongPressTimer = () => {
     if (longPressTimerRef.current) {
@@ -36,81 +51,179 @@ export const SwipeableSongRow: React.FC<SwipeableSongRowProps> = ({
     }
   };
 
+  const resetVisuals = (animate = true) => {
+    dragOffsetRef.current = 0;
+    const fg = foregroundRef.current;
+    const bg = bgRef.current;
+
+    if (fg) {
+      fg.style.transition = animate ? 'transform 180ms cubic-bezier(0.22, 1, 0.36, 1)' : 'none';
+      fg.style.transform = 'translate3d(0px, 0px, 0px)';
+      if (!animate) {
+        fg.style.willChange = 'transform';
+      } else {
+        window.setTimeout(() => {
+          if (foregroundRef.current && !isTrackingRef.current) {
+            foregroundRef.current.style.willChange = 'auto';
+          }
+        }, 190);
+      }
+    }
+
+    if (bg) {
+      bg.style.transition = animate ? 'opacity 160ms ease-out' : 'none';
+      bg.style.opacity = '0';
+    }
+  };
+
   const handleTouchStart = (e: React.TouchEvent) => {
-    if (disabled) return;
-    startXRef.current = e.touches[0].clientX;
-    startYRef.current = e.touches[0].clientY;
+    if (disabled || e.touches.length !== 1) return;
+    const touch = e.touches[0];
+    startXRef.current = touch.clientX;
+    startYRef.current = touch.clientY;
+    startTimeRef.current = performance.now();
+    dragOffsetRef.current = 0;
     isHorizontalSwipeRef.current = null;
+    thresholdHapticFiredRef.current = false;
+    wasDraggedRef.current = false;
     isLongPressRef.current = false;
-    setIsSwiping(true);
+    isTrackingRef.current = true;
+
+    if (foregroundRef.current) {
+      foregroundRef.current.style.transition = 'none';
+      foregroundRef.current.style.willChange = 'transform';
+    }
+    if (bgRef.current) {
+      bgRef.current.style.transition = 'none';
+    }
 
     clearLongPressTimer();
     longPressTimerRef.current = window.setTimeout(() => {
       isLongPressRef.current = true;
+      isTrackingRef.current = false;
       hapticFeedback();
+      resetVisuals(true);
       setSongOptionsMenuTarget({ song });
-      setIsSwiping(false);
-      setTranslateX(0);
     }, 450);
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    if (disabled || !isSwiping) return;
+    if (disabled || !isTrackingRef.current || e.touches.length !== 1) return;
 
-    const currentX = e.touches[0].clientX;
-    const currentY = e.touches[0].clientY;
-    const deltaX = currentX - startXRef.current;
-    const deltaY = currentY - startYRef.current;
+    const touch = e.touches[0];
+    const deltaX = touch.clientX - startXRef.current;
+    const deltaY = touch.clientY - startYRef.current;
 
-    // Cancel long press if finger moved significantly
-    if (Math.abs(deltaX) > 10 || Math.abs(deltaY) > 10) {
+    if (Math.abs(deltaX) > 9 || Math.abs(deltaY) > 9) {
       clearLongPressTimer();
     }
 
-    // Determine swipe axis on first movement
     if (isHorizontalSwipeRef.current === null) {
-      if (Math.abs(deltaX) > 8 || Math.abs(deltaY) > 8) {
-        isHorizontalSwipeRef.current = Math.abs(deltaX) > Math.abs(deltaY);
+      if (Math.abs(deltaX) > 6 || Math.abs(deltaY) > 6) {
+        const horizontal = Math.abs(deltaX) >= Math.abs(deltaY) * 0.8;
+        isHorizontalSwipeRef.current = horizontal;
+        if (!horizontal) {
+          isTrackingRef.current = false;
+          resetVisuals(false);
+          return;
+        }
+      } else {
+        return;
       }
     }
 
-    // Only handle horizontal swipe
     if (isHorizontalSwipeRef.current) {
-      const maxOffset = 110;
-      const clampedX = Math.max(-maxOffset, Math.min(maxOffset, deltaX));
-      setTranslateX(clampedX);
+      wasDraggedRef.current = true;
+      const abs = Math.abs(deltaX);
+      const sign = deltaX >= 0 ? 1 : -1;
+      const damped = abs <= 86 ? deltaX : sign * (86 + (abs - 86) * 0.3);
+      const clampedX = Math.max(-MAX_OFFSET, Math.min(MAX_OFFSET, damped));
+      dragOffsetRef.current = clampedX;
+
+      if (foregroundRef.current) {
+        foregroundRef.current.style.transform = `translate3d(${clampedX}px, 0px, 0px)`;
+      }
+
+      const absOffset = Math.abs(clampedX);
+      const isRight = clampedX > 0;
+      const isReady = absOffset >= SWIPE_THRESHOLD;
+
+      if (isReady && !thresholdHapticFiredRef.current) {
+        thresholdHapticFiredRef.current = true;
+        hapticFeedback();
+      } else if (!isReady) {
+        thresholdHapticFiredRef.current = false;
+      }
+
+      if (bgRef.current) {
+        bgRef.current.style.opacity = String(Math.min(1, absOffset / SWIPE_THRESHOLD));
+        bgRef.current.style.backgroundColor = isRight
+          ? isReady
+            ? 'rgb(37 99 235)'
+            : 'rgba(37, 99, 235, 0.72)'
+          : isReady
+          ? 'rgb(5 150 105)'
+          : 'rgba(5, 150, 105, 0.72)';
+      }
+
+      if (leftLabelRef.current) {
+        leftLabelRef.current.style.display = isRight ? 'flex' : 'none';
+      }
+      if (rightLabelRef.current) {
+        rightLabelRef.current.style.display = !isRight && clampedX !== 0 ? 'flex' : 'none';
+      }
     }
   };
 
-  const handleTouchEnd = () => {
+  const finishSwipe = (cancelled = false) => {
     clearLongPressTimer();
-    if (disabled || !isSwiping || isLongPressRef.current) {
-      setIsSwiping(false);
+    if (!isTrackingRef.current) return;
+    isTrackingRef.current = false;
+
+    const finalX = dragOffsetRef.current;
+    const elapsed = Math.max(1, performance.now() - startTimeRef.current);
+    const velocity = Math.abs(finalX) / elapsed;
+
+    resetVisuals(true);
+
+    if (disabled || isLongPressRef.current || cancelled || !isHorizontalSwipeRef.current) {
+      isHorizontalSwipeRef.current = null;
       return;
     }
-    setIsSwiping(false);
 
-    const threshold = 65; // minimum swipe distance
-    if (Math.abs(translateX) >= threshold) {
-      hapticFeedback();
-      const mode: 'next' | 'end' = translateX > 0 ? 'next' : 'end';
+    const isFlick =
+      Math.abs(finalX) >= FLICK_MIN_DISTANCE &&
+      elapsed <= FLICK_MAX_MS &&
+      velocity >= FLICK_MIN_VELOCITY;
+
+    if (Math.abs(finalX) >= SWIPE_THRESHOLD || isFlick) {
+      if (!thresholdHapticFiredRef.current) {
+        hapticFeedback();
+      }
+      const mode: 'next' | 'end' = finalX > 0 ? 'next' : 'end';
 
       if (onSwipeAdd) {
         onSwipeAdd(song, mode);
+      } else if (mode === 'next') {
+        playNextInQueue(song);
       } else {
-        if (mode === 'next') {
-          playNextInQueue(song);
-        } else {
-          addToQueue(song);
-        }
+        addToQueue(song);
       }
 
+      if (flashTimerRef.current) window.clearTimeout(flashTimerRef.current);
       setAddedMode(mode);
-      setTimeout(() => setAddedMode(null), 1300);
+      flashTimerRef.current = window.setTimeout(() => setAddedMode(null), 650);
     }
 
-    setTranslateX(0);
     isHorizontalSwipeRef.current = null;
+  };
+
+  const handleClickCapture = (e: React.MouseEvent) => {
+    if (wasDraggedRef.current) {
+      e.stopPropagation();
+      e.preventDefault();
+      wasDraggedRef.current = false;
+    }
   };
 
   const handleContextMenu = (e: React.MouseEvent) => {
@@ -119,60 +232,51 @@ export const SwipeableSongRow: React.FC<SwipeableSongRowProps> = ({
     setSongOptionsMenuTarget({ song });
   };
 
-  const isRightSwipe = translateX > 0;
-  const opacityRatio = Math.min(1, Math.abs(translateX) / 70);
-
   return (
     <div className={`relative overflow-hidden rounded-2xl select-none touch-pan-y ${className}`}>
-      {/* Background Swipe Action Indicator */}
+      {/* GPU-driven Background Swipe Action Indicator (no React re-renders during drag) */}
       <div
-        className={`absolute inset-0 flex items-center justify-between px-4 transition-colors duration-150 ${
-          isRightSwipe
-            ? Math.abs(translateX) >= 65
-              ? 'bg-blue-600'
-              : 'bg-blue-600/70'
-            : Math.abs(translateX) >= 65
-            ? 'bg-emerald-600'
-            : 'bg-emerald-600/70'
-        }`}
-        style={{ opacity: opacityRatio }}
+        ref={bgRef}
+        className="absolute inset-0 flex items-center justify-between px-4 pointer-events-none"
+        style={{ opacity: 0 }}
       >
-        {/* Swipe Right Action: Play Next */}
-        {isRightSwipe && (
-          <div className="flex items-center gap-2 text-white font-black text-xs">
-            <CornerDownRight className="w-4 h-4 animate-bounce" />
-            <span>Play Next</span>
-          </div>
-        )}
+        <div
+          ref={leftLabelRef}
+          className="items-center gap-2 text-white font-black text-xs"
+          style={{ display: 'none' }}
+        >
+          <CornerDownRight className="w-4 h-4" />
+          <span>Play Next</span>
+        </div>
         <div />
-        {/* Swipe Left Action: Add to End */}
-        {!isRightSwipe && (
-          <div className="flex items-center gap-2 text-white font-black text-xs">
-            <span>Add to End of Queue</span>
-            <ListPlus className="w-4 h-4 animate-bounce" />
-          </div>
-        )}
+        <div
+          ref={rightLabelRef}
+          className="items-center gap-2 text-white font-black text-xs"
+          style={{ display: 'none' }}
+        >
+          <span>Add to End of Queue</span>
+          <ListPlus className="w-4 h-4" />
+        </div>
       </div>
 
       {/* Foreground Song Row Content */}
       <div
+        ref={foregroundRef}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
-        onTouchCancel={handleTouchEnd}
+        onTouchEnd={() => finishSwipe(false)}
+        onTouchCancel={() => finishSwipe(true)}
+        onClickCapture={handleClickCapture}
         onContextMenu={handleContextMenu}
-        className={`relative z-10 w-full transition-transform ${
-          isSwiping ? 'transition-none' : 'duration-200 ease-out'
-        }`}
-        style={{ transform: `translateX(${translateX}px)` }}
+        className="relative z-10 w-full"
       >
         {children}
       </div>
 
-      {/* Quick Toast Flash */}
+      {/* Fast Non-Blocking Confirmation Flash */}
       {addedMode && (
         <div
-          className={`absolute inset-0 z-20 backdrop-blur-sm flex items-center justify-center gap-2 text-white text-xs font-black animate-in fade-in zoom-in-95 duration-150 ${
+          className={`absolute inset-0 z-20 pointer-events-none flex items-center justify-center gap-2 text-white text-xs font-black animate-in fade-in duration-100 ${
             addedMode === 'next' ? 'bg-blue-600/90' : 'bg-emerald-600/90'
           }`}
         >
@@ -182,4 +286,6 @@ export const SwipeableSongRow: React.FC<SwipeableSongRowProps> = ({
       )}
     </div>
   );
-};
+});
+
+SwipeableSongRow.displayName = 'SwipeableSongRow';

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useMusic } from '../../context/MusicContext';
+import { useMusic, usePlaybackTime } from '../../context/MusicContext';
 import {
   ChevronDown,
   MoreVertical,
@@ -35,8 +35,6 @@ export const FullScreenPlayer: React.FC = () => {
   const {
     currentSong,
     isPlaying,
-    currentTime,
-    duration,
     togglePlay,
     seekTo,
     nextTrack,
@@ -66,6 +64,7 @@ export const FullScreenPlayer: React.FC = () => {
     setAddToPlaylistTargetSong,
     setSongOptionsMenuTarget,
   } = useMusic();
+  const { currentTime, duration } = usePlaybackTime();
 
   const [activeTab, setActiveTab] = useState<'cover' | 'video' | 'lyrics' | 'queue'>('cover');
 

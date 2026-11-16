@@ -6,6 +6,7 @@ export const ExitConfirmModal: React.FC = () => {
   const {
     isExitConfirmOpen,
     setIsExitConfirmOpen,
+    confirmExitApp,
     themeColors,
     hapticFeedback,
   } = useMusic();
@@ -14,17 +15,7 @@ export const ExitConfirmModal: React.FC = () => {
 
   const handleConfirmExit = () => {
     hapticFeedback();
-    setIsExitConfirmOpen(false);
-    // Attempt window.close if opened as app/window, or navigate back in history
-    try {
-      window.close();
-    } catch {
-      // ignore
-    }
-    // Fallback: pop all the way back
-    if (typeof window !== 'undefined') {
-      window.history.go(-2);
-    }
+    confirmExitApp();
   };
 
   const handleCancel = () => {
@@ -33,7 +24,7 @@ export const ExitConfirmModal: React.FC = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-150">
+    <div className="fixed inset-0 z-[115] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-150">
       <div
         className="w-full max-w-xs rounded-3xl p-5 shadow-2xl border border-white/10 space-y-4 text-center transform animate-in zoom-in-95 duration-150"
         style={{ backgroundColor: themeColors.background1, color: themeColors.text }}

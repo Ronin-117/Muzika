@@ -1,9 +1,10 @@
 import React, { useEffect, useRef } from 'react';
-import { useMusic } from '../../context/MusicContext';
+import { useMusic, usePlaybackTime } from '../../context/MusicContext';
 import { Mic2, Loader2, Music, ExternalLink } from 'lucide-react';
 
 export const LyricsView: React.FC = () => {
-  const { currentLyrics, isLoadingLyrics, currentTime, seekTo, themeColors, hapticFeedback } = useMusic();
+  const { currentLyrics, isLoadingLyrics, seekTo, themeColors, hapticFeedback } = useMusic();
+  const { currentTime } = usePlaybackTime();
   const activeLineRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 

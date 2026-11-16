@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useMusic } from '../../context/MusicContext';
+import { useMusic, usePlaybackTime } from '../../context/MusicContext';
 import { Moon, X, Clock, PlayCircle } from 'lucide-react';
 
 export const SleepTimerSheet: React.FC = () => {
@@ -10,10 +10,9 @@ export const SleepTimerSheet: React.FC = () => {
     setSleepTimer,
     cancelSleepTimer,
     themeColors,
-    duration,
-    currentTime,
     hapticFeedback,
   } = useMusic();
+  const { duration, currentTime } = usePlaybackTime();
 
   const [customMinutes, setCustomMinutes] = useState(25);
 

@@ -9,7 +9,7 @@ export class OnlineMusicService {
    * Searches online music catalog for FULL-LENGTH tracks (complete songs from 0:00 to end)
    * with high-resolution artwork and direct high-fidelity MP3 audio streams.
    */
-  static async searchOnlineMusic(query: string, limit = 30): Promise<Song[]> {
+  static async searchOnlineMusic(query: string, limit = 30, signal?: AbortSignal): Promise<Song[]> {
     const trimmed = query.trim();
     if (!trimmed) return [];
 
@@ -21,7 +21,7 @@ export class OnlineMusicService {
     try {
       // 1. Query full-stack backend /api/search for genuine full-length YouTube Music tracks
       const backendUrl = `/api/search?q=${encodeURIComponent(trimmed)}&limit=${limit}`;
-      const res = await fetch(backendUrl);
+      const res = await fetch(backendUrl, { signal });
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data) && data.length > 0) {
@@ -40,14 +40,17 @@ export class OnlineMusicService {
           return songs;
         }
       }
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.name === 'AbortError') return [];
       console.warn('Backend search failed, checking fallbacks:', err);
     }
 
-    // 2. Fallback to iTunes search if Audius returned no results
+    if (signal?.aborted) return [];
+
+    // 2. Fallback to iTunes search if backend returned no results
     try {
       const itunesUrl = `https://itunes.apple.com/search?term=${encodeURIComponent(trimmed)}&entity=song&limit=${limit}`;
-      const res = await fetch(itunesUrl);
+      const res = await fetch(itunesUrl, { signal });
       if (!res.ok) return [];
 
       const data = await res.json();
@@ -112,15 +115,14 @@ export class OnlineMusicService {
   }
 
   /**
-  /**
    * Searches for verified artists online via YouTube Music
    */
-  static async searchOnlineArtists(query: string, limit = 12): Promise<Artist[]> {
+  static async searchOnlineArtists(query: string, limit = 12, signal?: AbortSignal): Promise<Artist[]> {
     const trimmed = query.trim();
     if (!trimmed) return [];
 
     try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(trimmed)}&type=artist&limit=${limit}`);
+      const res = await fetch(`/api/search?q=${encodeURIComponent(trimmed)}&type=artist&limit=${limit}`, { signal });
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data) && data.length > 0) {
@@ -142,8 +144,10 @@ export class OnlineMusicService {
           });
         }
       }
-    } catch (err) {
-      console.warn('Online artist search error:', err);
+    } catch (err: any) {
+      if (err?.name !== 'AbortError') {
+        console.warn('Online artist search error:', err);
+      }
     }
 
     return [];
@@ -152,12 +156,12 @@ export class OnlineMusicService {
   /**
    * Searches for official albums online via YouTube Music
    */
-  static async searchOnlineAlbums(query: string, limit = 12): Promise<Album[]> {
+  static async searchOnlineAlbums(query: string, limit = 12, signal?: AbortSignal): Promise<Album[]> {
     const trimmed = query.trim();
     if (!trimmed) return [];
 
     try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(trimmed)}&type=album&limit=${limit}`);
+      const res = await fetch(`/api/search?q=${encodeURIComponent(trimmed)}&type=album&limit=${limit}`, { signal });
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data) && data.length > 0) {
@@ -171,8 +175,10 @@ export class OnlineMusicService {
           }));
         }
       }
-    } catch (err) {
-      console.warn('Online album search error:', err);
+    } catch (err: any) {
+      if (err?.name !== 'AbortError') {
+        console.warn('Online album search error:', err);
+      }
     }
 
     return [];

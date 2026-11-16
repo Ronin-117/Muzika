@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useRef, useMemo, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useMemo, useCallback, ReactNode } from 'react';
 import {
   Song,
   Playlist,
@@ -28,12 +28,19 @@ import { getSubAudibleAudioUri, audioFocusManager } from '../utils/audioWakeLock
 import { extractDynamicPalette } from '../utils/colorExtractor';
 import { webAudioEqualizer } from '../utils/webAudioEqualizer';
 
+interface PlaybackTimeContextType {
+  currentTime: number;
+  duration: number;
+}
+
+const PlaybackTimeContext = createContext<PlaybackTimeContextType>({ currentTime: 0, duration: 0 });
+
+export const usePlaybackTime = () => useContext(PlaybackTimeContext);
+
 interface MusicContextType {
   // Current playback state
   currentSong: Song | null;
   isPlaying: boolean;
-  currentTime: number;
-  duration: number;
   volume: number;
   isMuted: boolean;
   repeatMode: RepeatMode;
@@ -60,6 +67,7 @@ interface MusicContextType {
   setIsRiplayImportOpen: (open: boolean) => void;
   isExitConfirmOpen: boolean;
   setIsExitConfirmOpen: (open: boolean) => void;
+  confirmExitApp: () => void;
 
   // Selected entities for detail screens
   selectedPlaylist: Playlist | null;
@@ -215,12 +223,39 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     return 'home';
   });
 
-  const setActiveTab = (tab: 'home' | 'explore' | 'search' | 'library' | 'rewind' | 'settings') => {
+  const pushHistoryLayer = useCallback((minDepth: number) => {
+    if (typeof window === 'undefined') return;
+    try {
+      const currentDepth = typeof window.history.state?.muzikaDepth === 'number'
+        ? window.history.state.muzikaDepth
+        : 0;
+      const hasUserActivation =
+        typeof (navigator as any).userActivation !== 'undefined'
+          ? !!(navigator as any).userActivation?.isActive
+          : true;
+
+      if (currentDepth < minDepth) {
+        const cappedDepth = Math.min(4, minDepth);
+        window.history.pushState(
+          { muzikaApp: true, muzikaDepth: cappedDepth, ua: hasUserActivation },
+          ''
+        );
+        if (hasUserActivation) {
+          trapActivatedRef.current = true;
+        }
+      }
+    } catch {}
+  }, []);
+
+  const setActiveTab = useCallback((tab: 'home' | 'explore' | 'search' | 'library' | 'rewind' | 'settings') => {
     setActiveTabState(tab);
     if (typeof window !== 'undefined') {
       localStorage.setItem('muzika_active_tab', tab);
     }
-  };
+    if (tab !== 'home') {
+      pushHistoryLayer(2);
+    }
+  }, [pushHistoryLayer]);
 
   const [isPlayerOpen, setIsPlayerOpenState] = useState(false);
   const [isQueueOpen, setIsQueueOpenState] = useState(false);
@@ -229,7 +264,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [isSongInfoOpen, setIsSongInfoOpenState] = useState(false);
   const [isPWAInstallModalOpen, setIsPWAInstallModalOpenState] = useState(false);
   const [isRiplayImportOpen, setIsRiplayImportOpenState] = useState(false);
-  const [isExitConfirmOpen, setIsExitConfirmOpen] = useState(false);
+  const [isExitConfirmOpen, setIsExitConfirmOpenState] = useState(false);
   const [playerMode, setPlayerMode] = useState<'audio' | 'video' | 'lyrics'>('audio');
 
   const [selectedPlaylist, setSelectedPlaylistState] = useState<Playlist | null>(null);
@@ -238,12 +273,14 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [selectedAlbum, setSelectedAlbumState] = useState<Album | null>(null);
 
   // Quick Action Modals & Toast State
-  const [addToPlaylistTargetSong, setAddToPlaylistTargetSong] = useState<Song | null>(null);
-  const [songOptionsMenuTarget, setSongOptionsMenuTarget] = useState<{ song: Song; queueContext?: Song[] } | null>(null);
-  const [syncTargetSong, setSyncTargetSong] = useState<Song | null>(null);
+  const [addToPlaylistTargetSong, setAddToPlaylistTargetSongState] = useState<Song | null>(null);
+  const [songOptionsMenuTarget, setSongOptionsMenuTargetState] = useState<{ song: Song; queueContext?: Song[] } | null>(null);
+  const [syncTargetSong, setSyncTargetSongState] = useState<Song | null>(null);
   const [previewingSongId, setPreviewingSongId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimerRef = useRef<number | null>(null);
+  const trapActivatedRef = useRef<boolean>(false);
+  const isExitingAppRef = useRef<boolean>(false);
 
   const showToast = (message: string) => {
     if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
@@ -253,19 +290,97 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     }, 2500);
   };
 
-  const setIsPlayerOpen = (open: boolean) => setIsPlayerOpenState(open);
-  const setIsQueueOpen = (open: boolean) => setIsQueueOpenState(open);
-  const setIsEqualizerOpen = (open: boolean) => setIsEqualizerOpenState(open);
-  const setIsSleepTimerOpen = (open: boolean) => setIsSleepTimerOpenState(open);
-  const setIsSongInfoOpen = (open: boolean) => setIsSongInfoOpenState(open);
-  const setIsPWAInstallModalOpen = (open: boolean) => setIsPWAInstallModalOpenState(open);
-  const setIsRiplayImportOpen = (open: boolean) => setIsRiplayImportOpenState(open);
-  const setSelectedPlaylist = (playlist: Playlist | null) => setSelectedPlaylistState(playlist);
-  const setSelectedArtistId = (artistId: string | null) => {
+  const setIsPlayerOpen = useCallback((open: boolean) => {
+    setIsPlayerOpenState(open);
+    if (open) pushHistoryLayer(3);
+  }, [pushHistoryLayer]);
+  const setIsQueueOpen = useCallback((open: boolean) => {
+    setIsQueueOpenState(open);
+    if (open) pushHistoryLayer(4);
+  }, [pushHistoryLayer]);
+  const setIsEqualizerOpen = useCallback((open: boolean) => {
+    setIsEqualizerOpenState(open);
+    if (open) pushHistoryLayer(4);
+  }, [pushHistoryLayer]);
+  const setIsSleepTimerOpen = useCallback((open: boolean) => {
+    setIsSleepTimerOpenState(open);
+    if (open) pushHistoryLayer(4);
+  }, [pushHistoryLayer]);
+  const setIsSongInfoOpen = useCallback((open: boolean) => {
+    setIsSongInfoOpenState(open);
+    if (open) pushHistoryLayer(4);
+  }, [pushHistoryLayer]);
+  const setIsPWAInstallModalOpen = useCallback((open: boolean) => {
+    setIsPWAInstallModalOpenState(open);
+    if (open) pushHistoryLayer(4);
+  }, [pushHistoryLayer]);
+  const setIsRiplayImportOpen = useCallback((open: boolean) => {
+    setIsRiplayImportOpenState(open);
+    if (open) pushHistoryLayer(4);
+  }, [pushHistoryLayer]);
+  const setSelectedPlaylist = useCallback((playlist: Playlist | null) => {
+    setSelectedPlaylistState(playlist);
+    if (playlist) pushHistoryLayer(2);
+  }, [pushHistoryLayer]);
+  const setSelectedArtistId = useCallback((artistId: string | null) => {
     setSelectedArtistIdState(artistId);
     if (!artistId) setSelectedArtist(null);
-  };
-  const setSelectedAlbum = (album: Album | null) => setSelectedAlbumState(album);
+    else pushHistoryLayer(2);
+  }, [pushHistoryLayer]);
+  const setSelectedAlbum = useCallback((album: Album | null) => {
+    setSelectedAlbumState(album);
+    if (album) pushHistoryLayer(2);
+  }, [pushHistoryLayer]);
+  const setAddToPlaylistTargetSong = useCallback((song: Song | null) => {
+    setAddToPlaylistTargetSongState(song);
+    if (song) pushHistoryLayer(4);
+  }, [pushHistoryLayer]);
+  const setSongOptionsMenuTarget = useCallback((target: { song: Song; queueContext?: Song[] } | null) => {
+    setSongOptionsMenuTargetState(target);
+    if (target) pushHistoryLayer(4);
+  }, [pushHistoryLayer]);
+  const setSyncTargetSong = useCallback((song: Song | null) => {
+    setSyncTargetSongState(song);
+    if (song) pushHistoryLayer(4);
+  }, [pushHistoryLayer]);
+
+  const setIsExitConfirmOpen = useCallback((open: boolean) => {
+    setIsExitConfirmOpenState(open);
+    if (!open && !isExitingAppRef.current) {
+      // User dismissed "Exit Muzika?" (tapped Stay / Back) under user gesture -> re-arm Home exit guard
+      if (typeof window !== 'undefined') {
+        try {
+          const depth = typeof window.history.state?.muzikaDepth === 'number' ? window.history.state.muzikaDepth : 0;
+          if (depth < 1 || !trapActivatedRef.current) {
+            window.history.pushState({ muzikaApp: true, muzikaDepth: 1, ua: true }, '');
+            trapActivatedRef.current = true;
+          }
+        } catch {}
+      }
+    }
+  }, []);
+
+  const confirmExitApp = useCallback(() => {
+    isExitingAppRef.current = true;
+    setIsExitConfirmOpenState(false);
+    if (typeof window !== 'undefined') {
+      try {
+        window.close();
+      } catch {}
+      try {
+        const depth = typeof window.history.state?.muzikaDepth === 'number'
+          ? window.history.state.muzikaDepth
+          : 1;
+        // Walk back past our app entries cleanly
+        window.history.go(-(depth + 1));
+        window.setTimeout(() => {
+          try {
+            window.history.back();
+          } catch {}
+        }, 50);
+      } catch {}
+    }
+  }, []);
 
   // Playback state restored from last session (Rewind support)
   const initialPlaybackState = useMemo(() => StorageService.getLastPlaybackState(), []);
@@ -276,6 +391,10 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [currentTime, setCurrentTime] = useState<number>(() => initialPlaybackState?.currentTime ?? 0);
   const [duration, setDuration] = useState<number>(() => initialPlaybackState?.duration ?? 0);
+  const currentTimeRef = useRef<number>(currentTime);
+  const durationRef = useRef<number>(duration);
+  currentTimeRef.current = currentTime;
+  durationRef.current = duration;
   const [volume, setVolumeState] = useState<number>(85);
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [repeatMode, setRepeatMode] = useState<RepeatMode>('off');
@@ -358,11 +477,13 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     return q ? q.name : 'Main Queue';
   }, [queues, activeQueueId]);
 
-  // Keep current active queue in queues state synchronized
+  // Keep current active queue in queues state synchronized (defer localStorage serialization to keep swipes 60fps)
+  const namedQueuesSaveTimerRef = useRef<number | null>(null);
   useEffect(() => {
     if (!enableMultipleQueues) return;
     setQueuesState((prev) => {
       const idx = prev.findIndex((q) => q.id === activeQueueId);
+      let updated: NamedQueue[];
       if (idx === -1) {
         const newQueueItem: NamedQueue = {
           id: activeQueueId,
@@ -371,13 +492,17 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           queueIndex,
           createdAt: Date.now(),
         };
-        const updated = [...prev, newQueueItem];
-        StorageService.saveNamedQueues(updated);
-        return updated;
+        updated = [...prev, newQueueItem];
+      } else {
+        updated = [...prev];
+        updated[idx] = { ...updated[idx], songs: queue, queueIndex };
       }
-      const updated = [...prev];
-      updated[idx] = { ...updated[idx], songs: queue, queueIndex };
-      StorageService.saveNamedQueues(updated);
+      if (namedQueuesSaveTimerRef.current) {
+        window.clearTimeout(namedQueuesSaveTimerRef.current);
+      }
+      namedQueuesSaveTimerRef.current = window.setTimeout(() => {
+        StorageService.saveNamedQueues(updated);
+      }, 180);
       return updated;
     });
   }, [queue, queueIndex, activeQueueId, enableMultipleQueues]);
@@ -536,7 +661,15 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const ensureHistoryTrap = () => {
     if (typeof window !== 'undefined') {
       try {
-        window.history.pushState({ muzikaApp: true }, '');
+        const hasUserActivation =
+          typeof (navigator as any).userActivation !== 'undefined'
+            ? !!(navigator as any).userActivation?.isActive
+            : false;
+        window.history.pushState(
+          { muzikaApp: true, muzikaDepth: 1, ua: hasUserActivation },
+          ''
+        );
+        trapActivatedRef.current = hasUserActivation;
       } catch {}
     }
   };
@@ -545,90 +678,106 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   useEffect(() => {
     if (typeof window !== 'undefined') {
       try {
-        window.history.replaceState({ muzikaRoot: true }, '');
-        window.history.pushState({ muzikaApp: true }, '');
+        window.history.replaceState({ muzikaRoot: true, muzikaDepth: 0 }, '');
+        window.history.pushState({ muzikaApp: true, muzikaDepth: 1, ua: false }, '');
+        trapActivatedRef.current = false;
       } catch {}
     }
 
+    // Chromium/Android History Manipulation Intervention ignores non-user-activated pushState
+    // entries when pressing Back. Promote our guard entry on real user gestures so Back on Home
+    // ALWAYS fires popstate and presents ExitConfirmModal instead of quitting immediately.
+    const activateTrapOnGesture = () => {
+      if (isExitingAppRef.current) return;
+      if (typeof window === 'undefined') return;
+      if (navStateRef.current.isExitConfirmOpen) return;
+
+      const curState = window.history.state;
+      const curDepth = typeof curState?.muzikaDepth === 'number' ? curState.muzikaDepth : 0;
+
+      if (!trapActivatedRef.current || curDepth < 1 || !curState?.ua) {
+        trapActivatedRef.current = true;
+        try {
+          if (curDepth <= 1) {
+            window.history.replaceState({ muzikaRoot: true, muzikaDepth: 0 }, '');
+            window.history.pushState({ muzikaApp: true, muzikaDepth: 1, ua: true }, '');
+          } else {
+            window.history.pushState(
+              { muzikaApp: true, muzikaDepth: curDepth, ua: true },
+              ''
+            );
+          }
+        } catch {}
+      }
+    };
+
     const handlePopState = () => {
+      if (isExitingAppRef.current) return;
       const state = navStateRef.current;
 
       // 1. If Exit confirmation modal is open, back button dismisses it
       if (state.isExitConfirmOpen) {
-        setIsExitConfirmOpen(false);
+        setIsExitConfirmOpenState(false);
         ensureHistoryTrap();
         return;
       }
 
       // 2. Modals & sheets in top-most z-index order
       if (state.syncTargetSong) {
-        setSyncTargetSong(null);
-        ensureHistoryTrap();
+        setSyncTargetSongState(null);
         return;
       }
       if (state.addToPlaylistTargetSong) {
-        setAddToPlaylistTargetSong(null);
-        ensureHistoryTrap();
+        setAddToPlaylistTargetSongState(null);
         return;
       }
       if (state.songOptionsMenuTarget) {
-        setSongOptionsMenuTarget(null);
-        ensureHistoryTrap();
+        setSongOptionsMenuTargetState(null);
         return;
       }
       if (state.isSongInfoOpen) {
         setIsSongInfoOpenState(false);
-        ensureHistoryTrap();
         return;
       }
       if (state.isQueueOpen) {
         setIsQueueOpenState(false);
-        ensureHistoryTrap();
         return;
       }
       if (state.isEqualizerOpen) {
         setIsEqualizerOpenState(false);
-        ensureHistoryTrap();
         return;
       }
       if (state.isSleepTimerOpen) {
         setIsSleepTimerOpenState(false);
-        ensureHistoryTrap();
         return;
       }
       if (state.isRiplayImportOpen) {
         setIsRiplayImportOpenState(false);
-        ensureHistoryTrap();
         return;
       }
       if (state.isPWAInstallModalOpen) {
         setIsPWAInstallModalOpenState(false);
-        ensureHistoryTrap();
         return;
       }
 
       // 3. Full-screen Player sits above Entity Detail screens (z-50 > z-40)
       if (state.isPlayerOpen) {
         setIsPlayerOpenState(false);
-        ensureHistoryTrap();
         return;
       }
 
       // 4. Entity Detail screens
       if (state.selectedPlaylist) {
         setSelectedPlaylistState(null);
-        ensureHistoryTrap();
         return;
       }
       if (state.selectedArtistId || state.selectedArtist) {
         setSelectedArtistIdState(null);
         setSelectedArtist(null);
-        ensureHistoryTrap();
         return;
       }
       if (state.selectedAlbum) {
         setSelectedAlbumState(null);
-        ensureHistoryTrap();
         return;
       }
 
@@ -638,17 +787,20 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         if (typeof window !== 'undefined') {
           localStorage.setItem('muzika_active_tab', 'home');
         }
-        ensureHistoryTrap();
         return;
       }
 
       // 6. We are on Home with no modals open: Prompt user before quitting!
-      ensureHistoryTrap();
-      setIsExitConfirmOpen(true);
+      trapActivatedRef.current = false;
+      setIsExitConfirmOpenState(true);
     };
 
+    window.addEventListener('pointerdown', activateTrapOnGesture, { capture: true, passive: true });
+    window.addEventListener('keydown', activateTrapOnGesture, { capture: true, passive: true });
     window.addEventListener('popstate', handlePopState);
     return () => {
+      window.removeEventListener('pointerdown', activateTrapOnGesture, { capture: true } as any);
+      window.removeEventListener('keydown', activateTrapOnGesture, { capture: true } as any);
       window.removeEventListener('popstate', handlePopState);
     };
   }, []);
@@ -820,8 +972,11 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
     const handleTimeUpdate = () => {
       if (activeEngineRef.current === 'html') {
-        setCurrentTime(audio.currentTime);
+        const t = audio.currentTime;
+        currentTimeRef.current = t;
+        setCurrentTime(t);
         if (audio.duration && !isNaN(audio.duration) && audio.duration > 0) {
+          durationRef.current = audio.duration;
           setDuration(audio.duration);
         }
       }
@@ -872,6 +1027,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     const handleLoadedMetadata = () => {
       if (activeEngineRef.current === 'html') {
         if (audio.duration && !isNaN(audio.duration) && audio.duration > 0) {
+          durationRef.current = audio.duration;
           setDuration(audio.duration);
         }
       }
@@ -937,8 +1093,12 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       onTimeUpdate: (time, dur) => {
         if (isPreviewingRef.current) return;
         if (activeEngineRef.current === 'youtube') {
+          currentTimeRef.current = time;
           setCurrentTime(time);
-          if (dur > 0) setDuration(dur);
+          if (dur > 0) {
+            durationRef.current = dur;
+            setDuration(dur);
+          }
         }
       },
       onError: (err) => {
@@ -954,7 +1114,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     };
   }, []);
 
-  // Update MediaSession for Android lockscreen & background notifications
+  // Update MediaSession metadata & action handlers ONLY when track or playing state changes
   useEffect(() => {
     if (typeof window !== 'undefined' && 'mediaSession' in navigator) {
       if (currentSong) {
@@ -971,18 +1131,6 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       }
 
       navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
-
-      if ('setPositionState' in navigator.mediaSession && duration > 0) {
-        try {
-          navigator.mediaSession.setPositionState({
-            duration: Math.max(1, duration),
-            playbackRate: 1,
-            position: Math.max(0, Math.min(currentTime, duration)),
-          });
-        } catch (e) {
-          // ignore
-        }
-      }
 
       navigator.mediaSession.setActionHandler('play', () => {
         userPausedRef.current = false;
@@ -1001,42 +1149,88 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       });
       navigator.mediaSession.setActionHandler('seekbackward', (details) => {
         const skip = details.seekOffset || 10;
-        seekTo(Math.max(0, currentTime - skip));
+        seekTo(Math.max(0, currentTimeRef.current - skip));
       });
       navigator.mediaSession.setActionHandler('seekforward', (details) => {
         const skip = details.seekOffset || 10;
-        seekTo(Math.min(duration, currentTime + skip));
+        seekTo(Math.min(durationRef.current, currentTimeRef.current + skip));
       });
       navigator.mediaSession.setActionHandler('stop', () => {
         setIsPlaying(false);
       });
     }
-  }, [currentSong, isPlaying, currentTime, duration]);
+  }, [currentSong, isPlaying]);
 
-  // Continuously persist current playback state (Rewind support)
+  // Throttled MediaSession position sync (once per ~1.5s to avoid 4x/sec bridge overhead)
+  const lastMediaSessionPosSyncRef = useRef<number>(0);
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('mediaSession' in navigator) || !('setPositionState' in navigator.mediaSession)) {
+      return;
+    }
+    if (duration <= 0) return;
+    const now = Date.now();
+    if (now - lastMediaSessionPosSyncRef.current < 1500) return;
+    lastMediaSessionPosSyncRef.current = now;
+    try {
+      navigator.mediaSession.setPositionState({
+        duration: Math.max(1, duration),
+        playbackRate: 1,
+        position: Math.max(0, Math.min(currentTime, duration)),
+      });
+    } catch {}
+  }, [currentTime, duration]);
+
+  // Persist playback state throttled cleanly (avoids serializing large queues to localStorage 4x/sec)
+  const lastSavedPlaybackSecRef = useRef<number>(-99);
+  const lastSavedSongIdRef = useRef<string | null>(null);
+  const playbackSaveTimerRef = useRef<number | null>(null);
   useEffect(() => {
     if (!currentSong) return;
-
-    // Save current song and timestamp
+    const sec = Math.floor(currentTime);
+    const trackChanged = lastSavedSongIdRef.current !== currentSong.id;
+    if (!trackChanged && Math.abs(sec - lastSavedPlaybackSecRef.current) < 4) {
+      return;
+    }
+    lastSavedPlaybackSecRef.current = sec;
+    lastSavedSongIdRef.current = currentSong.id;
     StorageService.saveLastPlaybackState({
       song: currentSong,
-      currentTime: Math.floor(currentTime),
+      currentTime: sec,
       duration,
       queueIndex,
       queue,
     });
-  }, [currentSong, currentTime, duration, queueIndex, queue]);
+  }, [currentSong, currentTime, duration]);
 
-  // Save on page exit / unload
+  // Defer saving on queue structure changes so swipe-to-queue / queue reordering stays 60fps
+  useEffect(() => {
+    if (!currentSongRef.current) return;
+    if (playbackSaveTimerRef.current) window.clearTimeout(playbackSaveTimerRef.current);
+    playbackSaveTimerRef.current = window.setTimeout(() => {
+      if (!currentSongRef.current) return;
+      StorageService.saveLastPlaybackState({
+        song: currentSongRef.current,
+        currentTime: Math.floor(currentTimeRef.current),
+        duration: durationRef.current,
+        queueIndex: queueIndexRef.current,
+        queue: queueRef.current,
+      });
+    }, 200);
+    return () => {
+      if (playbackSaveTimerRef.current) window.clearTimeout(playbackSaveTimerRef.current);
+    };
+  }, [queueIndex, queue]);
+
+  // Save on page exit / unload using refs (registered ONCE cleanly)
   useEffect(() => {
     const handleBeforeUnload = () => {
-      if (currentSong) {
+      if (currentSongRef.current) {
         StorageService.saveLastPlaybackState({
-          song: currentSong,
-          currentTime: Math.floor(currentTime),
-          duration,
-          queueIndex,
-          queue,
+          song: currentSongRef.current,
+          currentTime: Math.floor(currentTimeRef.current),
+          duration: durationRef.current,
+          queueIndex: queueIndexRef.current,
+          queue: queueRef.current,
         });
       }
     };
@@ -1047,7 +1241,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       window.removeEventListener('beforeunload', handleBeforeUnload);
       window.removeEventListener('pagehide', handleBeforeUnload);
     };
-  }, [currentSong, currentTime, duration, queueIndex, queue]);
+  }, []);
 
   // Fetch lyrics when track changes
   useEffect(() => {
@@ -1396,7 +1590,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         webAudioEqualizer.ensureActive(htmlAudioRef.current, equalizerSettingsRef.current);
       }
       silentKeepAliveRef.current?.play().catch(() => {});
-      const resumePos = currentTime > 0 ? currentTime : 0;
+      const resumePos = currentTimeRef.current > 0 ? currentTimeRef.current : 0;
 
       if (activeEngineRef.current === 'html' && htmlAudioRef.current?.src) {
         if (ytControllerRef.current) ytControllerRef.current.pause();
@@ -1423,7 +1617,9 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   };
 
   const seekTo = (seconds: number) => {
-    const clamped = Math.max(0, Math.min(seconds, duration));
+    const activeDur = durationRef.current || 0;
+    const clamped = Math.max(0, Math.min(seconds, activeDur));
+    currentTimeRef.current = clamped;
     setCurrentTime(clamped);
     if (activeEngineRef.current === 'youtube') {
       ytControllerRef.current?.seekTo(clamped);
@@ -1433,10 +1629,10 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         htmlAudioRef.current.currentTime = clamped;
       } catch {}
     }
-    if (typeof navigator !== 'undefined' && 'mediaSession' in navigator && 'setPositionState' in navigator.mediaSession && duration > 0) {
+    if (typeof navigator !== 'undefined' && 'mediaSession' in navigator && 'setPositionState' in navigator.mediaSession && activeDur > 0) {
       try {
         navigator.mediaSession.setPositionState({
-          duration: Math.max(1, duration),
+          duration: Math.max(1, activeDur),
           playbackRate: 1,
           position: clamped,
         });
@@ -1459,7 +1655,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   const prevTrack = () => {
     hapticFeedback();
-    if (currentTime > 4) {
+    if (currentTimeRef.current > 4) {
       seekTo(0);
       return;
     }
@@ -1507,20 +1703,26 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     else setRepeatMode('off');
   };
 
-  // Queue actions
-  const addToQueue = (song: Song) => {
+  // Queue actions (stable callbacks using queueIndexRef so SwipeableSongRow updates in 1 frame)
+  const addToQueue = useCallback((song: Song) => {
     hapticFeedback();
-    setQueue((prev) => [...prev, song]);
-  };
+    setQueue((prev) => {
+      const updated = [...prev, song];
+      queueRef.current = updated;
+      return updated;
+    });
+  }, []);
 
-  const playNextInQueue = (song: Song) => {
+  const playNextInQueue = useCallback((song: Song) => {
     hapticFeedback();
     setQueue((prev) => {
       const newQ = [...prev];
-      newQ.splice(queueIndex + 1, 0, song);
+      const insertAt = Math.min(newQ.length, Math.max(0, queueIndexRef.current + 1));
+      newQ.splice(insertAt, 0, song);
+      queueRef.current = newQ;
       return newQ;
     });
-  };
+  }, []);
 
   const removeFromQueue = (index: number) => {
     hapticFeedback();
@@ -2232,140 +2434,146 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     return await applySongSync(song, bestMatch, true);
   };
 
+  const playbackTimeValue = useMemo(
+    () => ({ currentTime, duration }),
+    [currentTime, duration]
+  );
+
   return (
-    <MusicContext.Provider
-      value={{
-        currentSong,
-        isPlaying,
-        currentTime,
-        duration,
-        volume,
-        isMuted,
-        repeatMode,
-        isShuffle,
-        queue,
-        queueIndex,
-        playerMode,
-        setPlayerMode,
-        isPlayerOpen,
-        setIsPlayerOpen,
-        isQueueOpen,
-        setIsQueueOpen,
-        isEqualizerOpen,
-        setIsEqualizerOpen,
-        isSleepTimerOpen,
-        setIsSleepTimerOpen,
-        isSongInfoOpen,
-        setIsSongInfoOpen,
-        isPWAInstallModalOpen,
-        setIsPWAInstallModalOpen,
-        isRiplayImportOpen,
-        setIsRiplayImportOpen,
-        isExitConfirmOpen,
-        setIsExitConfirmOpen,
-        selectedPlaylist,
-        setSelectedPlaylist,
-        selectedArtistId,
-        setSelectedArtistId,
-        selectedArtist,
-        setSelectedArtist,
-        selectedAlbum,
-        setSelectedAlbum,
-        activeTab,
-        setActiveTab,
-        currentLyrics,
-        isLoadingLyrics,
-        playSong,
-        togglePlay,
-        seekTo,
-        nextTrack,
-        prevTrack,
-        setVolume,
-        toggleMute,
-        toggleShuffle,
-        cycleRepeat,
-        addToQueue,
-        playNextInQueue,
-        removeFromQueue,
-        clearQueue,
-        reorderQueue,
-        likedSongs,
-        toggleLike,
-        isLiked,
-        playlists,
-        createPlaylist,
-        addToPlaylist,
-        removeFromPlaylist,
-        deletePlaylist,
-        history,
-        clearHistory,
-        blacklist,
-        addToBlacklist,
-        removeFromBlacklist,
-        isBlacklisted,
-        userStats,
-        equalizerSettings,
-        setEqualizerSettings,
-        sleepTimerSeconds,
-        setSleepTimer,
-        cancelSleepTimer,
-        theme,
-        setTheme,
-        themeColors,
-        hapticFeedback,
-        addLocalSongs,
-        cachedSongIds,
-        cachingSongIds,
-        cachedTracks,
-        isSongCached,
-        isSongCaching,
-        getSongCoverUrl,
-        cacheSong,
-        removeCachedSong,
-        clearOfflineCache,
-        batchCacheState,
-        cacheSongsBatch,
-        cancelBatchCache,
-        cacheConfig,
-        updateCacheConfig,
-        storageEstimate,
-        importRiplaySqliteBackup,
-        importedArtists,
-        importedAlbums,
-        lastImportSummary,
-        savedArtists,
-        toggleFollowArtist,
-        isArtistFollowed,
-        savedAlbums,
-        toggleSaveAlbum,
-        isAlbumSaved,
-        addToPlaylistTargetSong,
-        setAddToPlaylistTargetSong,
-        songOptionsMenuTarget,
-        setSongOptionsMenuTarget,
-        syncTargetSong,
-        setSyncTargetSong,
-        previewingSongId,
-        previewSongCandidate,
-        stopPreviewCandidate,
-        applySongSync,
-        autoSyncSong,
-        toastMessage,
-        showToast,
-        enableMultipleQueues,
-        setEnableMultipleQueues,
-        queues,
-        activeQueueId,
-        activeQueueName,
-        switchQueue,
-        createQueue,
-        renameQueue,
-        deleteQueue,
-        addPlaylistToQueue,
-      }}
-    >
-      {children}
-    </MusicContext.Provider>
+    <PlaybackTimeContext.Provider value={playbackTimeValue}>
+      <MusicContext.Provider
+        value={{
+          currentSong,
+          isPlaying,
+          volume,
+          isMuted,
+          repeatMode,
+          isShuffle,
+          queue,
+          queueIndex,
+          playerMode,
+          setPlayerMode,
+          isPlayerOpen,
+          setIsPlayerOpen,
+          isQueueOpen,
+          setIsQueueOpen,
+          isEqualizerOpen,
+          setIsEqualizerOpen,
+          isSleepTimerOpen,
+          setIsSleepTimerOpen,
+          isSongInfoOpen,
+          setIsSongInfoOpen,
+          isPWAInstallModalOpen,
+          setIsPWAInstallModalOpen,
+          isRiplayImportOpen,
+          setIsRiplayImportOpen,
+          isExitConfirmOpen,
+          setIsExitConfirmOpen,
+          confirmExitApp,
+          selectedPlaylist,
+          setSelectedPlaylist,
+          selectedArtistId,
+          setSelectedArtistId,
+          selectedArtist,
+          setSelectedArtist,
+          selectedAlbum,
+          setSelectedAlbum,
+          activeTab,
+          setActiveTab,
+          currentLyrics,
+          isLoadingLyrics,
+          playSong,
+          togglePlay,
+          seekTo,
+          nextTrack,
+          prevTrack,
+          setVolume,
+          toggleMute,
+          toggleShuffle,
+          cycleRepeat,
+          addToQueue,
+          playNextInQueue,
+          removeFromQueue,
+          clearQueue,
+          reorderQueue,
+          likedSongs,
+          toggleLike,
+          isLiked,
+          playlists,
+          createPlaylist,
+          addToPlaylist,
+          removeFromPlaylist,
+          deletePlaylist,
+          history,
+          clearHistory,
+          blacklist,
+          addToBlacklist,
+          removeFromBlacklist,
+          isBlacklisted,
+          userStats,
+          equalizerSettings,
+          setEqualizerSettings,
+          sleepTimerSeconds,
+          setSleepTimer,
+          cancelSleepTimer,
+          theme,
+          setTheme,
+          themeColors,
+          hapticFeedback,
+          addLocalSongs,
+          cachedSongIds,
+          cachingSongIds,
+          cachedTracks,
+          isSongCached,
+          isSongCaching,
+          getSongCoverUrl,
+          cacheSong,
+          removeCachedSong,
+          clearOfflineCache,
+          batchCacheState,
+          cacheSongsBatch,
+          cancelBatchCache,
+          cacheConfig,
+          updateCacheConfig,
+          storageEstimate,
+          importRiplaySqliteBackup,
+          importedArtists,
+          importedAlbums,
+          lastImportSummary,
+          savedArtists,
+          toggleFollowArtist,
+          isArtistFollowed,
+          savedAlbums,
+          toggleSaveAlbum,
+          isAlbumSaved,
+          addToPlaylistTargetSong,
+          setAddToPlaylistTargetSong,
+          songOptionsMenuTarget,
+          setSongOptionsMenuTarget,
+          syncTargetSong,
+          setSyncTargetSong,
+          previewingSongId,
+          previewSongCandidate,
+          stopPreviewCandidate,
+          applySongSync,
+          autoSyncSong,
+          toastMessage,
+          showToast,
+          enableMultipleQueues,
+          setEnableMultipleQueues,
+          queues,
+          activeQueueId,
+          activeQueueName,
+          switchQueue,
+          createQueue,
+          renameQueue,
+          deleteQueue,
+          addPlaylistToQueue,
+        }}
+      >
+        {children}
+      </MusicContext.Provider>
+    </PlaybackTimeContext.Provider>
   );
 };
 
