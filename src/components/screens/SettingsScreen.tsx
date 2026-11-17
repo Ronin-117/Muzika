@@ -22,6 +22,7 @@ import {
   HardDrive,
   FileDown,
   ListMusic,
+  PhoneCall,
 } from 'lucide-react';
 import { StorageService } from '../../services/storageService';
 import { usePWAInstall } from '../../hooks/usePWAInstall';
@@ -46,6 +47,8 @@ export const SettingsScreen: React.FC = () => {
     clearOfflineCache,
     enableMultipleQueues,
     setEnableMultipleQueues,
+    autoResumeOnCall,
+    setAutoResumeOnCall,
   } = useMusic();
   const { isInstalled } = usePWAInstall();
 
@@ -228,6 +231,31 @@ export const SettingsScreen: React.FC = () => {
               </div>
             </div>
             <span className="text-xs opacity-60 font-medium">Set</span>
+          </div>
+
+          <div className="flex items-center justify-between p-3.5">
+            <div className="flex items-center gap-3 pr-3">
+              <PhoneCall className="w-5 h-5 opacity-70 shrink-0" />
+              <div>
+                <div className="text-sm font-semibold">Auto-Pause & Resume on Calls</div>
+                <div className="text-xs opacity-50">
+                  Pause cleanly during phone calls and resume automatically when finished
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={() => setAutoResumeOnCall(!autoResumeOnCall)}
+              aria-label="Toggle auto-pause and resume on calls"
+              className={`w-11 h-6 rounded-full transition-colors relative flex items-center p-0.5 shrink-0 cursor-pointer ${
+                autoResumeOnCall ? 'bg-emerald-500' : 'bg-white/10'
+              }`}
+            >
+              <div
+                className={`w-5 h-5 rounded-full bg-white transition-transform ${
+                  autoResumeOnCall ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
           </div>
 
           <div className="flex items-center justify-between p-3.5">

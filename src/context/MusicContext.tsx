@@ -117,6 +117,10 @@ interface MusicContextType {
   deleteQueue: (queueId: string) => void;
   addPlaylistToQueue: (playlistOrSongs: Playlist | Song[], mode?: 'replace' | 'append' | 'next') => void;
 
+  // Call & Audio Interruption Auto-Resume (Default ON)
+  autoResumeOnCall: boolean;
+  setAutoResumeOnCall: (enabled: boolean) => void;
+
   // User collections
   likedSongs: Song[];
   toggleLike: (song: Song) => void;
@@ -455,20 +459,30 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [savedArtists, setSavedArtists] = useState<Artist[]>(() => StorageService.getSavedArtists());
   const [savedAlbums, setSavedAlbums] = useState<Album[]>(() => StorageService.getSavedAlbums());
 
+  // Call / External Audio Interruption Auto-Pause & Auto-Resume (Default ON)
+  const [autoResumeOnCall, setAutoResumeOnCallState] = useState<boolean>(() => StorageService.getAutoResumeOnCall());
+  const autoResumeOnCallRef = useRef<boolean>(autoResumeOnCall);
+  autoResumeOnCallRef.current = autoResumeOnCall;
+
   // Multiple Queues feature (Toggleable in Settings)
   const [enableMultipleQueues, setEnableMultipleQueuesState] = useState<boolean>(() => StorageService.getEnableMultipleQueues());
+  const enableMultipleQueuesRef = useRef<boolean>(enableMultipleQueues);
+  enableMultipleQueuesRef.current = enableMultipleQueues;
   const [activeQueueId, setActiveQueueIdState] = useState<string>(() => StorageService.getActiveQueueId());
+  const activeQueueIdRef = useRef<string>(activeQueueId);
   const [queues, setQueuesState] = useState<NamedQueue[]>(() => {
     const saved = StorageService.getNamedQueues();
     if (saved && saved.length > 0) return saved;
     return [
-      { id: 'queue-main', name: 'Main Queue', songs: queue, queueIndex: 0, createdAt: Date.now() },
+      { id: 'queue-main', name: 'Main Queue', songs: [...queue], queueIndex: 0, createdAt: Date.now() },
     ];
   });
+  const queuesRef = useRef<NamedQueue[]>(queues);
 
   const setEnableMultipleQueues = (enabled: boolean) => {
     hapticFeedback();
     setEnableMultipleQueuesState(enabled);
+    enableMultipleQueuesRef.current = enabled;
     StorageService.saveEnableMultipleQueues(enabled);
   };
 
@@ -481,58 +495,91 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const namedQueuesSaveTimerRef = useRef<number | null>(null);
   useEffect(() => {
     if (!enableMultipleQueues) return;
-    setQueuesState((prev) => {
-      const idx = prev.findIndex((q) => q.id === activeQueueId);
-      let updated: NamedQueue[];
-      if (idx === -1) {
-        const newQueueItem: NamedQueue = {
-          id: activeQueueId,
-          name: activeQueueId === 'queue-main' ? 'Main Queue' : 'Custom Queue',
-          songs: queue,
-          queueIndex,
-          createdAt: Date.now(),
-        };
-        updated = [...prev, newQueueItem];
-      } else {
-        updated = [...prev];
-        updated[idx] = { ...updated[idx], songs: queue, queueIndex };
+    const curActiveId = activeQueueId;
+    const currentList = queuesRef.current;
+    const idx = currentList.findIndex((q) => q.id === curActiveId);
+
+    if (idx !== -1) {
+      const existing = currentList[idx];
+      // Skip redundant sync when switchQueue/createQueue already committed this exact queue state
+      if (existing.songs === queue && existing.queueIndex === queueIndex) {
+        return;
       }
+      const updated = [...currentList];
+      updated[idx] = { ...existing, songs: [...queue], queueIndex };
+      queuesRef.current = updated;
+      setQueuesState(updated);
       if (namedQueuesSaveTimerRef.current) {
         window.clearTimeout(namedQueuesSaveTimerRef.current);
       }
       namedQueuesSaveTimerRef.current = window.setTimeout(() => {
+        namedQueuesSaveTimerRef.current = null;
         StorageService.saveNamedQueues(updated);
       }, 180);
-      return updated;
-    });
+    } else {
+      const newQueueItem: NamedQueue = {
+        id: curActiveId,
+        name: curActiveId === 'queue-main' ? 'Main Queue' : 'Custom Queue',
+        songs: [...queue],
+        queueIndex,
+        createdAt: Date.now(),
+      };
+      const updated = [...currentList, newQueueItem];
+      queuesRef.current = updated;
+      setQueuesState(updated);
+      if (namedQueuesSaveTimerRef.current) {
+        window.clearTimeout(namedQueuesSaveTimerRef.current);
+      }
+      namedQueuesSaveTimerRef.current = window.setTimeout(() => {
+        namedQueuesSaveTimerRef.current = null;
+        StorageService.saveNamedQueues(updated);
+      }, 180);
+    }
   }, [queue, queueIndex, activeQueueId, enableMultipleQueues]);
 
   const switchQueue = (queueId: string) => {
     hapticFeedback();
-    const target = queues.find((q) => q.id === queueId);
+    clearInterruptionStateRef.current();
+    const prevQueueId = activeQueueIdRef.current;
+    if (queueId === prevQueueId) return;
+
+    const currentList = queuesRef.current;
+    const target = currentList.find((q) => q.id === queueId);
     if (!target) return;
 
-    // Save current queue state
-    setQueuesState((prev) => {
-      const updated = prev.map((q) => {
-        if (q.id === activeQueueId) {
-          return { ...q, songs: queueRef.current, queueIndex: queueIndexRef.current || 0 };
-        }
-        return q;
-      });
-      StorageService.saveNamedQueues(updated);
-      return updated;
-    });
+    if (namedQueuesSaveTimerRef.current) {
+      window.clearTimeout(namedQueuesSaveTimerRef.current);
+      namedQueuesSaveTimerRef.current = null;
+    }
 
+    // Snapshot previous active queue BEFORE mutating queueRef/activeQueueIdRef
+    const prevSongsSnapshot = [...queueRef.current];
+    const prevIdxSnapshot = Math.max(0, queueIndexRef.current || 0);
+
+    const savedQueues = currentList.map((q) =>
+      q.id === prevQueueId
+        ? { ...q, songs: prevSongsSnapshot, queueIndex: prevIdxSnapshot }
+        : q
+    );
+    queuesRef.current = savedQueues;
+    setQueuesState(savedQueues);
+    StorageService.saveNamedQueues(savedQueues);
+
+    // Clone target queue songs so independent queues never share mutable array references
+    const targetSongs = target.songs && target.songs.length > 0 ? [...target.songs] : [];
+    const targetIdx =
+      targetSongs.length > 0
+        ? Math.min(Math.max(0, target.queueIndex || 0), targetSongs.length - 1)
+        : 0;
+
+    activeQueueIdRef.current = queueId;
     setActiveQueueIdState(queueId);
     StorageService.saveActiveQueueId(queueId);
 
-    const targetSongs = target.songs && target.songs.length > 0 ? target.songs : [];
-    const targetIdx = targetSongs.length > 0 ? Math.min(target.queueIndex || 0, targetSongs.length - 1) : 0;
-    setQueue(targetSongs);
     queueRef.current = targetSongs;
-    setQueueIndex(targetIdx);
     queueIndexRef.current = targetIdx;
+    setQueue(targetSongs);
+    setQueueIndex(targetIdx);
 
     const targetSong = targetSongs[targetIdx] || targetSongs[0];
     if (targetSong) {
@@ -542,8 +589,14 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   const createQueue = (name: string, initialSongs?: Song[]) => {
     hapticFeedback();
+    clearInterruptionStateRef.current();
     const newId = `queue-${Date.now()}`;
-    const songsToUse = initialSongs && initialSongs.length > 0 ? initialSongs : (currentSong ? [currentSong] : []);
+    const songsToUse =
+      initialSongs && initialSongs.length > 0
+        ? [...initialSongs]
+        : currentSongRef.current
+        ? [currentSongRef.current]
+        : [];
     const newQueueItem: NamedQueue = {
       id: newId,
       name: name.trim() || 'New Queue',
@@ -551,33 +604,72 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       queueIndex: 0,
       createdAt: Date.now(),
     };
-    setQueuesState((prev) => {
-      const updated = [...prev, newQueueItem];
-      StorageService.saveNamedQueues(updated);
-      return updated;
-    });
-    switchQueue(newId);
+
+    if (namedQueuesSaveTimerRef.current) {
+      window.clearTimeout(namedQueuesSaveTimerRef.current);
+      namedQueuesSaveTimerRef.current = null;
+    }
+
+    // Snapshot previous active queue cleanly before switching to newly created queue
+    const prevQueueId = activeQueueIdRef.current;
+    const prevSongsSnapshot = [...queueRef.current];
+    const prevIdxSnapshot = Math.max(0, queueIndexRef.current || 0);
+
+    const nextQueues = [
+      ...queuesRef.current.map((q) =>
+        q.id === prevQueueId
+          ? { ...q, songs: prevSongsSnapshot, queueIndex: prevIdxSnapshot }
+          : q
+      ),
+      newQueueItem,
+    ];
+    queuesRef.current = nextQueues;
+    setQueuesState(nextQueues);
+    StorageService.saveNamedQueues(nextQueues);
+
+    activeQueueIdRef.current = newId;
+    setActiveQueueIdState(newId);
+    StorageService.saveActiveQueueId(newId);
+
+    const nextTargetSongs = [...songsToUse];
+    queueRef.current = nextTargetSongs;
+    queueIndexRef.current = 0;
+    setQueue(nextTargetSongs);
+    setQueueIndex(0);
+
+    if (nextTargetSongs[0]) {
+      playIndex(0, 0, nextTargetSongs, nextTargetSongs[0]);
+    }
   };
 
   const renameQueue = (queueId: string, newName: string) => {
     hapticFeedback();
     if (!newName.trim()) return;
-    setQueuesState((prev) => {
-      const updated = prev.map((q) => (q.id === queueId ? { ...q, name: newName.trim() } : q));
-      StorageService.saveNamedQueues(updated);
-      return updated;
-    });
+    if (namedQueuesSaveTimerRef.current) {
+      window.clearTimeout(namedQueuesSaveTimerRef.current);
+      namedQueuesSaveTimerRef.current = null;
+    }
+    const updated = queuesRef.current.map((q) =>
+      q.id === queueId ? { ...q, name: newName.trim() } : q
+    );
+    queuesRef.current = updated;
+    setQueuesState(updated);
+    StorageService.saveNamedQueues(updated);
   };
 
   const deleteQueue = (queueId: string) => {
     hapticFeedback();
     if (queueId === 'queue-main') return;
-    setQueuesState((prev) => {
-      const updated = prev.filter((q) => q.id !== queueId);
-      StorageService.saveNamedQueues(updated);
-      return updated;
-    });
-    if (activeQueueId === queueId) {
+    const wasActive = activeQueueIdRef.current === queueId;
+    if (namedQueuesSaveTimerRef.current) {
+      window.clearTimeout(namedQueuesSaveTimerRef.current);
+      namedQueuesSaveTimerRef.current = null;
+    }
+    const updated = queuesRef.current.filter((q) => q.id !== queueId);
+    queuesRef.current = updated;
+    setQueuesState(updated);
+    StorageService.saveNamedQueues(updated);
+    if (wasActive) {
       switchQueue('queue-main');
     }
   };
@@ -864,10 +956,131 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const playRequestIdRef = useRef<number>(0);
   const lastBlobUrlRef = useRef<string | null>(null);
   const preloadTimerRef = useRef<number | null>(null);
+  const interruptedBySystemRef = useRef<boolean>(false);
+  const attemptingResumeRef = useRef<boolean>(false);
+  const pauseVerifyTimerRef = useRef<number | null>(null);
+  const resumeVerifyTimerRef = useRef<number | null>(null);
+  const interruptionRecoveryTimerRef = useRef<number | null>(null);
+  const clearInterruptionStateRef = useRef<() => void>(() => {});
+  const startInterruptionRecoveryRef = useRef<() => void>(() => {});
+  const attemptInterruptionResumeRef = useRef<() => void>(() => {});
   const handleTrackEndedRef = useRef<() => void>(() => {});
   const playIndexRef = useRef<
     (index: number, startAtSecond?: number, overrideQueue?: Song[], overrideSong?: Song) => Promise<void>
   >(async () => {});
+
+  const clearInterruptionState = () => {
+    interruptedBySystemRef.current = false;
+    attemptingResumeRef.current = false;
+    if (pauseVerifyTimerRef.current) {
+      window.clearTimeout(pauseVerifyTimerRef.current);
+      pauseVerifyTimerRef.current = null;
+    }
+    if (resumeVerifyTimerRef.current) {
+      window.clearTimeout(resumeVerifyTimerRef.current);
+      resumeVerifyTimerRef.current = null;
+    }
+    if (interruptionRecoveryTimerRef.current) {
+      window.clearInterval(interruptionRecoveryTimerRef.current);
+      interruptionRecoveryTimerRef.current = null;
+    }
+  };
+  clearInterruptionStateRef.current = clearInterruptionState;
+
+  const attemptInterruptionResume = async () => {
+    if (
+      !interruptedBySystemRef.current ||
+      !autoResumeOnCallRef.current ||
+      userPausedRef.current ||
+      isTransitioningRef.current ||
+      attemptingResumeRef.current
+    ) {
+      return;
+    }
+    attemptingResumeRef.current = true;
+    try {
+      if (activeEngineRef.current === 'html' && htmlAudioRef.current) {
+        const audio = htmlAudioRef.current;
+        if (!(audio.currentSrc || audio.src) || audio.ended) {
+          clearInterruptionState();
+          return;
+        }
+        audioFocusManager.start();
+        webAudioEqualizer.ensureActive(audio, equalizerSettingsRef.current);
+        silentKeepAliveRef.current?.play().catch(() => {});
+        try {
+          await audio.play();
+        } catch {
+          silentKeepAliveRef.current?.pause();
+          return;
+        }
+        // Confirm playback stayed active after ~320ms (OS isn't re-pausing during active call)
+        if (resumeVerifyTimerRef.current) window.clearTimeout(resumeVerifyTimerRef.current);
+        resumeVerifyTimerRef.current = window.setTimeout(() => {
+          resumeVerifyTimerRef.current = null;
+          if (!interruptedBySystemRef.current || userPausedRef.current) return;
+          const a = htmlAudioRef.current;
+          if (a && !a.paused && !a.ended) {
+            clearInterruptionState();
+            setIsPlaying(true);
+            if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+              navigator.mediaSession.playbackState = 'playing';
+            }
+          } else {
+            silentKeepAliveRef.current?.pause();
+          }
+        }, 320);
+      } else if (activeEngineRef.current === 'youtube' && ytControllerRef.current) {
+        audioFocusManager.start();
+        silentKeepAliveRef.current?.play().catch(() => {});
+        ytControllerRef.current.play();
+        if (resumeVerifyTimerRef.current) window.clearTimeout(resumeVerifyTimerRef.current);
+        resumeVerifyTimerRef.current = window.setTimeout(() => {
+          resumeVerifyTimerRef.current = null;
+          if (!interruptedBySystemRef.current || userPausedRef.current) return;
+          if (ytControllerRef.current?.getPlayerState() === 1) {
+            clearInterruptionState();
+            setIsPlaying(true);
+            if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+              navigator.mediaSession.playbackState = 'playing';
+            }
+          } else {
+            silentKeepAliveRef.current?.pause();
+          }
+        }, 550);
+      }
+    } finally {
+      window.setTimeout(() => {
+        attemptingResumeRef.current = false;
+      }, 380);
+    }
+  };
+  attemptInterruptionResumeRef.current = attemptInterruptionResume;
+
+  const startInterruptionRecovery = () => {
+    if (!autoResumeOnCallRef.current || userPausedRef.current) return;
+    if (interruptedBySystemRef.current) return;
+    interruptedBySystemRef.current = true;
+    // Pause keepalive carrier while call holds telecom audio focus
+    silentKeepAliveRef.current?.pause();
+    if (interruptionRecoveryTimerRef.current) {
+      window.clearInterval(interruptionRecoveryTimerRef.current);
+    }
+    interruptionRecoveryTimerRef.current = window.setInterval(() => {
+      attemptInterruptionResumeRef.current();
+    }, 2000);
+  };
+  startInterruptionRecoveryRef.current = startInterruptionRecovery;
+
+  const setAutoResumeOnCall = (enabled: boolean) => {
+    hapticFeedback();
+    setAutoResumeOnCallState(enabled);
+    autoResumeOnCallRef.current = enabled;
+    StorageService.saveAutoResumeOnCall(enabled);
+    if (!enabled) {
+      clearInterruptionState();
+    }
+  };
 
   useEffect(() => {
     if (theme === 'dynamic') {
@@ -886,7 +1099,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     return THEMES[theme] || THEMES.riplay;
   }, [theme, dynamicColors]);
 
-  // Initialize Hardware Audio Wake-Lock Carrier Loop
+  // Initialize Hardware Audio Wake-Lock Carrier Loop & OS Interruption Listener
   useEffect(() => {
     const carrierUri = getSubAudibleAudioUri();
     const silentAudio = new Audio(carrierUri);
@@ -897,7 +1110,45 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     silentAudio.setAttribute('x-webkit-airplay', 'allow');
     silentKeepAliveRef.current = silentAudio;
 
+    const handleCarrierPlay = () => {
+      if (interruptedBySystemRef.current && autoResumeOnCallRef.current && !userPausedRef.current) {
+        attemptInterruptionResumeRef.current();
+      }
+    };
+    silentAudio.addEventListener('play', handleCarrierPlay);
+
+    // iOS Safari / WebKit fires AudioContext state transitions 'interrupted' <-> 'running' on phone calls
+    const unsubInterruption = audioFocusManager.onInterruptionChange((interrupted) => {
+      if (interrupted) {
+        if (isPlayingRef.current && !userPausedRef.current && !isTransitioningRef.current) {
+          if (activeEngineRef.current === 'html' && htmlAudioRef.current) {
+            try {
+              htmlAudioRef.current.pause();
+            } catch {}
+          } else if (activeEngineRef.current === 'youtube' && ytControllerRef.current) {
+            try {
+              ytControllerRef.current.pause();
+            } catch {}
+          }
+          setIsPlaying(false);
+          if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+            navigator.mediaSession.playbackState = 'paused';
+          }
+          if (autoResumeOnCallRef.current) {
+            startInterruptionRecoveryRef.current();
+          }
+        }
+      } else {
+        if (interruptedBySystemRef.current && autoResumeOnCallRef.current && !userPausedRef.current) {
+          attemptInterruptionResumeRef.current();
+        }
+      }
+    });
+
     return () => {
+      unsubInterruption();
+      silentAudio.removeEventListener('play', handleCarrierPlay);
+      clearInterruptionStateRef.current();
       silentAudio.pause();
       audioFocusManager.stop();
     };
@@ -913,13 +1164,20 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       }
     } else {
       silentKeepAliveRef.current?.pause();
-      audioFocusManager.stop();
+      // Do not forcibly suspend AudioContext during an external call interruption so OS 'running' transition still fires on call end
+      if (!interruptedBySystemRef.current && audioFocusManager.getState() !== 'interrupted') {
+        audioFocusManager.stop();
+      }
     }
   }, [isPlaying]);
 
-  // Handle visibilitychange safeguard (prevent mobile OS from throttling background playback)
+  // Handle visibilitychange & window focus safeguard (prevent mobile OS from throttling background playback & resume after call)
   useEffect(() => {
     const handleVisibilityChange = () => {
+      if (interruptedBySystemRef.current && autoResumeOnCallRef.current && !userPausedRef.current && !isTransitioningRef.current) {
+        attemptInterruptionResumeRef.current();
+        return;
+      }
       if (isPlayingRef.current && !userPausedRef.current && !isTransitioningRef.current) {
         audioFocusManager.start();
         silentKeepAliveRef.current?.play().catch(() => {});
@@ -934,9 +1192,17 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       }
     };
 
+    const handleWindowFocus = () => {
+      if (interruptedBySystemRef.current && autoResumeOnCallRef.current && !userPausedRef.current && !isTransitioningRef.current) {
+        attemptInterruptionResumeRef.current();
+      }
+    };
+
     document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleWindowFocus);
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleWindowFocus);
     };
   }, []);
 
@@ -990,8 +1256,27 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
     const handlePlay = () => {
       if (activeEngineRef.current === 'html') {
-        setIsPlaying(true);
+        if (pauseVerifyTimerRef.current) {
+          window.clearTimeout(pauseVerifyTimerRef.current);
+          pauseVerifyTimerRef.current = null;
+        }
         webAudioEqualizer.ensureActive(audio, equalizerSettingsRef.current);
+        if (interruptedBySystemRef.current) {
+          // Confirm playback actually holds past 300ms (ignore transient focus bounce during an ongoing call)
+          if (resumeVerifyTimerRef.current) window.clearTimeout(resumeVerifyTimerRef.current);
+          resumeVerifyTimerRef.current = window.setTimeout(() => {
+            resumeVerifyTimerRef.current = null;
+            if (!audio.paused && !audio.ended && !userPausedRef.current) {
+              clearInterruptionStateRef.current();
+              setIsPlaying(true);
+              if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+                navigator.mediaSession.playbackState = 'playing';
+              }
+            }
+          }, 300);
+          return;
+        }
+        setIsPlaying(true);
         if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
           navigator.mediaSession.playbackState = 'playing';
         }
@@ -1009,11 +1294,41 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         if (isTransitioningRef.current) {
           return;
         }
+        if (resumeVerifyTimerRef.current) {
+          window.clearTimeout(resumeVerifyTimerRef.current);
+          resumeVerifyTimerRef.current = null;
+        }
+        if (interruptedBySystemRef.current) {
+          setIsPlaying(false);
+          if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+            navigator.mediaSession.playbackState = 'paused';
+          }
+          return;
+        }
         if (!userPausedRef.current && isPlayingRef.current) {
           const curAudio = htmlAudioRef.current;
-          // Only resume unintended OS/background pause if track hasn't ended and has an active source
+          // Preserve existing immediate anti-throttle retry for screen-off playback
           if (curAudio && curAudio.paused && !curAudio.ended && !!(curAudio.currentSrc || curAudio.src)) {
             curAudio.play().catch(() => {});
+            // If OS telecom/call holds audio focus and playback stays paused after 350ms,
+            // pause UI cleanly and arm auto-resume when the call/interruption ends.
+            if (pauseVerifyTimerRef.current) window.clearTimeout(pauseVerifyTimerRef.current);
+            pauseVerifyTimerRef.current = window.setTimeout(() => {
+              pauseVerifyTimerRef.current = null;
+              if (userPausedRef.current || isTransitioningRef.current || activeEngineRef.current !== 'html') {
+                return;
+              }
+              const a = htmlAudioRef.current;
+              if (a && a.paused && !a.ended && !!(a.currentSrc || a.src)) {
+                setIsPlaying(false);
+                if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+                  navigator.mediaSession.playbackState = 'paused';
+                }
+                if (autoResumeOnCallRef.current) {
+                  startInterruptionRecoveryRef.current();
+                }
+              }
+            }, 350);
           }
           return;
         }
@@ -1069,16 +1384,61 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         if (activeEngineRef.current === 'youtube') {
           if (isTransitioningRef.current) return;
           if (state === 1) {
+            if (pauseVerifyTimerRef.current) {
+              window.clearTimeout(pauseVerifyTimerRef.current);
+              pauseVerifyTimerRef.current = null;
+            }
+            if (interruptedBySystemRef.current) {
+              if (resumeVerifyTimerRef.current) window.clearTimeout(resumeVerifyTimerRef.current);
+              resumeVerifyTimerRef.current = window.setTimeout(() => {
+                resumeVerifyTimerRef.current = null;
+                if (!userPausedRef.current && ytControllerRef.current?.getPlayerState() === 1) {
+                  clearInterruptionStateRef.current();
+                  setIsPlaying(true);
+                  if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+                    navigator.mediaSession.playbackState = 'playing';
+                  }
+                }
+              }, 450);
+              return;
+            }
             setIsPlaying(true);
             userPausedRef.current = false;
             if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
               navigator.mediaSession.playbackState = 'playing';
             }
           } else if (state === 2) {
+            if (resumeVerifyTimerRef.current) {
+              window.clearTimeout(resumeVerifyTimerRef.current);
+              resumeVerifyTimerRef.current = null;
+            }
+            if (interruptedBySystemRef.current) {
+              setIsPlaying(false);
+              if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+                navigator.mediaSession.playbackState = 'paused';
+              }
+              return;
+            }
             // Check if this was a user-initiated pause or browser background throttle pause
             if (!userPausedRef.current && isPlayingRef.current) {
               console.log('[YouTube Player] Background throttle pause intercepted; resuming playback...');
               ytControllerRef.current?.play();
+              if (pauseVerifyTimerRef.current) window.clearTimeout(pauseVerifyTimerRef.current);
+              pauseVerifyTimerRef.current = window.setTimeout(() => {
+                pauseVerifyTimerRef.current = null;
+                if (userPausedRef.current || isTransitioningRef.current || activeEngineRef.current !== 'youtube') {
+                  return;
+                }
+                if (ytControllerRef.current?.getPlayerState() !== 1) {
+                  setIsPlaying(false);
+                  if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+                    navigator.mediaSession.playbackState = 'paused';
+                  }
+                  if (autoResumeOnCallRef.current) {
+                    startInterruptionRecoveryRef.current();
+                  }
+                }
+              }, 500);
               return;
             }
             setIsPlaying(false);
@@ -1133,10 +1493,12 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
 
       navigator.mediaSession.setActionHandler('play', () => {
+        clearInterruptionState();
         userPausedRef.current = false;
         togglePlay();
       });
       navigator.mediaSession.setActionHandler('pause', () => {
+        clearInterruptionState();
         userPausedRef.current = true;
         togglePlay();
       });
@@ -1156,6 +1518,8 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         seekTo(Math.min(durationRef.current, currentTimeRef.current + skip));
       });
       navigator.mediaSession.setActionHandler('stop', () => {
+        clearInterruptionState();
+        userPausedRef.current = true;
         setIsPlaying(false);
       });
     }
@@ -1232,6 +1596,19 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           queueIndex: queueIndexRef.current,
           queue: queueRef.current,
         });
+      }
+      if (enableMultipleQueuesRef.current) {
+        if (namedQueuesSaveTimerRef.current) {
+          window.clearTimeout(namedQueuesSaveTimerRef.current);
+          namedQueuesSaveTimerRef.current = null;
+        }
+        const curId = activeQueueIdRef.current;
+        const flushed = queuesRef.current.map((q) =>
+          q.id === curId
+            ? { ...q, songs: [...queueRef.current], queueIndex: queueIndexRef.current || 0 }
+            : q
+        );
+        StorageService.saveNamedQueues(flushed);
       }
     };
 
@@ -1378,6 +1755,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     const reqId = ++playRequestIdRef.current;
     isTransitioningRef.current = true;
     userPausedRef.current = false;
+    clearInterruptionState();
     audioFocusManager.start();
 
     // Immediately pause and detach the previous track's audio source BEFORE async resolution
@@ -1527,6 +1905,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   const playSong = (song: Song, customQueue?: Song[]) => {
     hapticFeedback();
+    clearInterruptionState();
     userPausedRef.current = false;
     audioFocusManager.start();
     if (htmlAudioRef.current) {
@@ -1562,6 +1941,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   const togglePlay = () => {
     hapticFeedback();
+    clearInterruptionState();
     if (!currentSong) {
       if (queue.length > 0) playIndex(0);
       return;
@@ -1894,6 +2274,8 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       setSleepTimerSeconds((prev) => {
         if (prev === null || prev <= 1) {
           if (sleepTimerIntervalRef.current) clearInterval(sleepTimerIntervalRef.current);
+          clearInterruptionState();
+          userPausedRef.current = true;
           // Pause playback
           if (currentSong?.source === 'youtube') {
             ytControllerRef.current?.pause();
@@ -2353,14 +2735,13 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     setQueue(updatedActiveQueue);
     queueRef.current = updatedActiveQueue;
 
-    setQueuesState((prev) => {
-      const updated = prev.map((q) => ({
-        ...q,
-        songs: replaceInList(q.songs),
-      }));
-      StorageService.saveNamedQueues(updated);
-      return updated;
-    });
+    const updatedNamedQueues = queuesRef.current.map((q) => ({
+      ...q,
+      songs: replaceInList(q.songs),
+    }));
+    queuesRef.current = updatedNamedQueues;
+    setQueuesState(updatedNamedQueues);
+    StorageService.saveNamedQueues(updatedNamedQueues);
 
     // 7. Rewrite inside Imported / Saved Artists & Albums
     setImportedArtists((prev) => {
@@ -2569,6 +2950,8 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           renameQueue,
           deleteQueue,
           addPlaylistToQueue,
+          autoResumeOnCall,
+          setAutoResumeOnCall,
         }}
       >
         {children}

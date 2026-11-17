@@ -59,6 +59,26 @@ class AudioFocusManager {
   private osc: OscillatorNode | null = null;
   private gain: GainNode | null = null;
   private isRunning = false;
+  private interruptionListeners = new Set<(interrupted: boolean) => void>();
+
+  onInterruptionChange(cb: (interrupted: boolean) => void): () => void {
+    this.interruptionListeners.add(cb);
+    return () => {
+      this.interruptionListeners.delete(cb);
+    };
+  }
+
+  private notifyInterruption(interrupted: boolean) {
+    this.interruptionListeners.forEach((cb) => {
+      try {
+        cb(interrupted);
+      } catch {}
+    });
+  }
+
+  getState(): string {
+    return this.ctx?.state || 'closed';
+  }
 
   start() {
     if (typeof window === 'undefined') return;
@@ -78,9 +98,18 @@ class AudioFocusManager {
         this.gain.connect(this.ctx.destination);
         this.osc.start();
         this.isRunning = true;
+
+        this.ctx.onstatechange = () => {
+          const state = this.ctx?.state as string;
+          if (state === 'interrupted') {
+            this.notifyInterruption(true);
+          } else if (state === 'running') {
+            this.notifyInterruption(false);
+          }
+        };
       }
 
-      if (this.ctx.state === 'suspended') {
+      if (this.ctx.state === 'suspended' || (this.ctx.state as string) === 'interrupted') {
         this.ctx.resume().catch(() => {});
       }
     } catch {
@@ -100,3 +129,4 @@ class AudioFocusManager {
 }
 
 export const audioFocusManager = new AudioFocusManager();
+

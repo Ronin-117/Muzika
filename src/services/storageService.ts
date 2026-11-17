@@ -19,6 +19,7 @@ const STORAGE_KEYS = {
   NAMED_QUEUES: 'muzika_named_queues',
   ACTIVE_QUEUE_ID: 'muzika_active_queue_id',
   SONG_SYNC_OVERRIDES: 'muzika_song_sync_overrides',
+  AUTO_RESUME_ON_CALL: 'muzika_auto_resume_on_call',
 };
 
 export const DEFAULT_EQUALIZER: EqualizerSettings = {
@@ -347,6 +348,21 @@ export class StorageService {
   static saveActiveQueueId(id: string): void {
     try {
       localStorage.setItem(STORAGE_KEYS.ACTIVE_QUEUE_ID, id);
+    } catch {}
+  }
+
+  static getAutoResumeOnCall(): boolean {
+    try {
+      const val = localStorage.getItem(STORAGE_KEYS.AUTO_RESUME_ON_CALL);
+      return val === null ? true : val === 'true';
+    } catch {
+      return true;
+    }
+  }
+
+  static saveAutoResumeOnCall(enabled: boolean): void {
+    try {
+      localStorage.setItem(STORAGE_KEYS.AUTO_RESUME_ON_CALL, String(enabled));
     } catch {}
   }
 

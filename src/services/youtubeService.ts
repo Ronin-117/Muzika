@@ -165,6 +165,15 @@ export class YouTubeController {
     }
   }
 
+  getPlayerState(): number {
+    try {
+      if (this.player && typeof this.player.getPlayerState === 'function') {
+        return this.player.getPlayerState();
+      }
+    } catch {}
+    return -1;
+  }
+
   seekTo(seconds: number) {
     if (this.player && typeof this.player.seekTo === 'function') {
       this.player.seekTo(seconds, true);
