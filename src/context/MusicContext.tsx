@@ -968,6 +968,9 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const pausePlaybackRef = useRef<() => void>(() => {});
   const resumePlaybackRef = useRef<() => void>(() => {});
   const stopPlaybackSessionRef = useRef<() => void>(() => {});
+  const prevTrackRef = useRef<() => void>(() => {});
+  const nextTrackRef = useRef<() => void>(() => {});
+  const seekToRef = useRef<(seconds: number) => void>(() => {});
   const handleTrackEndedRef = useRef<() => void>(() => {});
   const playIndexRef = useRef<
     (index: number, startAtSecond?: number, overrideQueue?: Song[], overrideSong?: Song) => Promise<void>
@@ -976,13 +979,6 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const assertPausedMediaSessionState = () => {
     if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
       navigator.mediaSession.playbackState = sessionStoppedRef.current ? 'none' : 'paused';
-      window.setTimeout(() => {
-        if (!isPlayingRef.current && currentSongRef.current && !sessionStoppedRef.current) {
-          try {
-            navigator.mediaSession.playbackState = 'paused';
-          } catch {}
-        }
-      }, 120);
     }
   };
 
@@ -1121,7 +1117,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     const carrierUri = getSubAudibleAudioUri();
     const silentAudio = new Audio(carrierUri);
     silentAudio.loop = true;
-    silentAudio.volume = 0.035; // Passes Android Chromium audibility floor while remaining infrasonic & inaudible
+    silentAudio.volume = 0.02; // Active during playback to satisfy Android hardware AudioTrack wake-lock
     (silentAudio as any).playsInline = true;
     silentAudio.setAttribute('playsinline', 'true');
     silentAudio.setAttribute('x-webkit-airplay', 'allow');
@@ -1130,13 +1126,6 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     const handleCarrierPlay = () => {
       if (interruptedBySystemRef.current && autoResumeOnCallRef.current && !userPausedRef.current) {
         attemptInterruptionResumeRef.current();
-        return;
-      }
-      // Keep MediaSession visually & AVRCP-logically 'paused' while carrier holds background notification alive
-      if (!isPlayingRef.current && currentSongRef.current && !sessionStoppedRef.current) {
-        if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
-          navigator.mediaSession.playbackState = 'paused';
-        }
       }
     };
     silentAudio.addEventListener('play', handleCarrierPlay);
@@ -1166,7 +1155,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         if (interruptedBySystemRef.current && autoResumeOnCallRef.current && !userPausedRef.current) {
           attemptInterruptionResumeRef.current();
         } else if (!isPlayingRef.current && !sessionStoppedRef.current && currentSongRef.current) {
-          silentKeepAliveRef.current?.play().catch(() => {});
+          audioFocusManager.start();
           assertPausedMediaSessionState();
         }
       }
@@ -1181,7 +1170,10 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     };
   }, []);
 
-  // Synchronize Audio Focus & Carrier Wake-Lock while active OR while intentionally paused (keeps notification & Bluetooth controls alive)
+  // Synchronize HTML5 Keep-Alive Carrier & WebAudio Focus:
+  // - While playing: keep both AudioContext & silentKeepAlive <audio> running
+  // - While paused (app open): pause silentKeepAlive <audio> so Android notification immediately switches to ▶ Play
+  //   and Bluetooth AVRCP accepts 'play', while keeping AudioContext running so background tab isn't frozen!
   useEffect(() => {
     if (isPlaying) {
       sessionStoppedRef.current = false;
@@ -1191,17 +1183,12 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         (navigator as any).wakeLock?.request('screen').catch(() => {});
       }
     } else {
+      silentKeepAliveRef.current?.pause();
       if (!sessionStoppedRef.current && currentSongRef.current && !interruptedBySystemRef.current) {
-        // Music is paused while app stays open -> hold Media Notification & headphone controls alive
         audioFocusManager.start();
-        silentKeepAliveRef.current?.play().catch(() => {});
         assertPausedMediaSessionState();
-      } else {
-        silentKeepAliveRef.current?.pause();
-        // Do not forcibly suspend AudioContext during an external call interruption so OS 'running' transition still fires on call end
-        if (!interruptedBySystemRef.current && audioFocusManager.getState() !== 'interrupted') {
-          audioFocusManager.stop();
-        }
+      } else if (!interruptedBySystemRef.current && audioFocusManager.getState() !== 'interrupted') {
+        audioFocusManager.stop();
       }
     }
   }, [isPlaying]);
@@ -1226,7 +1213,6 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         }
       } else if (!sessionStoppedRef.current && currentSongRef.current && !interruptedBySystemRef.current) {
         audioFocusManager.start();
-        silentKeepAliveRef.current?.play().catch(() => {});
         assertPausedMediaSessionState();
       }
     };
@@ -1513,56 +1499,70 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     };
   }, []);
 
-  // Update MediaSession metadata & action handlers ONLY when track or playing state changes
+  // 1. Register MediaSession action handlers ONCE on mount using latest refs (never reset on play/pause!)
   useEffect(() => {
-    if (typeof window !== 'undefined' && 'mediaSession' in navigator) {
-      if (currentSong) {
-        const coverSrc = offlineCacheService.getCachedCoverUrl(currentSong.id) || currentSong.thumbnailUrl;
-        navigator.mediaSession.metadata = new MediaMetadata({
-          title: currentSong.title,
-          artist: currentSong.artist,
-          album: currentSong.album || 'Muzika',
-          artwork: [
-            { src: coverSrc, sizes: '96x96', type: 'image/jpeg' },
-            { src: coverSrc, sizes: '192x192', type: 'image/jpeg' },
-            { src: coverSrc, sizes: '512x512', type: 'image/jpeg' },
-          ],
-        });
+    if (typeof window === 'undefined' || !('mediaSession' in navigator)) return;
+
+    navigator.mediaSession.setActionHandler('play', () => {
+      resumePlaybackRef.current();
+    });
+    navigator.mediaSession.setActionHandler('pause', () => {
+      pausePlaybackRef.current();
+    });
+    navigator.mediaSession.setActionHandler('previoustrack', () => {
+      prevTrackRef.current();
+    });
+    navigator.mediaSession.setActionHandler('nexttrack', () => {
+      nextTrackRef.current();
+    });
+    navigator.mediaSession.setActionHandler('seekto', (details) => {
+      if (details.seekTime !== undefined) {
+        seekToRef.current(details.seekTime);
       }
+    });
+    navigator.mediaSession.setActionHandler('seekbackward', (details) => {
+      const skip = details.seekOffset || 10;
+      seekToRef.current(Math.max(0, currentTimeRef.current - skip));
+    });
+    navigator.mediaSession.setActionHandler('seekforward', (details) => {
+      const skip = details.seekOffset || 10;
+      seekToRef.current(Math.min(durationRef.current, currentTimeRef.current + skip));
+    });
+    navigator.mediaSession.setActionHandler('stop', () => {
+      stopPlaybackSessionRef.current();
+    });
+  }, []);
 
-      navigator.mediaSession.playbackState =
-        !currentSong || sessionStoppedRef.current
-          ? 'none'
-          : isPlaying
-          ? 'playing'
-          : 'paused';
-
-      navigator.mediaSession.setActionHandler('play', () => {
-        resumePlaybackRef.current();
+  // 2. Update MediaMetadata ONLY when the track itself changes (prevents notification flicker/reset on pause)
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('mediaSession' in navigator)) return;
+    if (currentSong) {
+      const coverSrc = offlineCacheService.getCachedCoverUrl(currentSong.id) || currentSong.thumbnailUrl;
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: currentSong.title,
+        artist: currentSong.artist,
+        album: currentSong.album || 'Muzika',
+        artwork: [
+          { src: coverSrc, sizes: '96x96', type: 'image/jpeg' },
+          { src: coverSrc, sizes: '192x192', type: 'image/jpeg' },
+          { src: coverSrc, sizes: '512x512', type: 'image/jpeg' },
+        ],
       });
-      navigator.mediaSession.setActionHandler('pause', () => {
-        pausePlaybackRef.current();
-      });
-      navigator.mediaSession.setActionHandler('previoustrack', () => prevTrack());
-      navigator.mediaSession.setActionHandler('nexttrack', () => nextTrack());
-      navigator.mediaSession.setActionHandler('seekto', (details) => {
-        if (details.seekTime !== undefined) {
-          seekTo(details.seekTime);
-        }
-      });
-      navigator.mediaSession.setActionHandler('seekbackward', (details) => {
-        const skip = details.seekOffset || 10;
-        seekTo(Math.max(0, currentTimeRef.current - skip));
-      });
-      navigator.mediaSession.setActionHandler('seekforward', (details) => {
-        const skip = details.seekOffset || 10;
-        seekTo(Math.min(durationRef.current, currentTimeRef.current + skip));
-      });
-      navigator.mediaSession.setActionHandler('stop', () => {
-        stopPlaybackSessionRef.current();
-      });
+    } else {
+      navigator.mediaSession.metadata = null;
     }
-  }, [currentSong, isPlaying]);
+  }, [currentSong?.id, currentSong?.thumbnailUrl, currentSong?.title, currentSong?.artist, currentSong?.album]);
+
+  // 3. Keep MediaSession playbackState synchronized cleanly
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('mediaSession' in navigator)) return;
+    navigator.mediaSession.playbackState =
+      !currentSong || sessionStoppedRef.current
+        ? 'none'
+        : isPlaying
+        ? 'playing'
+        : 'paused';
+  }, [currentSong?.id, isPlaying]);
 
   // Sync MediaSession position (immediate on play/pause/track switch, throttled every ~1.5s while playing)
   const lastMediaSessionPosSyncRef = useRef<number>(0);
@@ -2001,11 +2001,11 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     if (ytControllerRef.current && activeEngineRef.current === 'youtube') {
       ytControllerRef.current.pause();
     }
-
-    // Keep keep-alive carrier + AudioFocus active while app stays open so Notification Bar & headphone controls never vanish
+    // Pause HTML5 silent carrier so Chrome Android flips notification button to Play (▶) and Bluetooth AVRCP accepts 'play',
+    // while keeping WebAudio AudioFocus context running so background tab isn't frozen while paused.
+    silentKeepAliveRef.current?.pause();
     if (currentSongRef.current) {
       audioFocusManager.start();
-      silentKeepAliveRef.current?.play().catch(() => {});
     }
 
     setIsPlaying(false);
@@ -2030,14 +2030,18 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     silentKeepAliveRef.current?.play().catch(() => {});
     const resumePos = currentTimeRef.current > 0 ? currentTimeRef.current : 0;
 
-    if (activeEngineRef.current === 'html' && htmlAudioRef.current?.src) {
+    if (activeEngineRef.current === 'html' && htmlAudioRef.current && (htmlAudioRef.current.currentSrc || htmlAudioRef.current.src)) {
       if (ytControllerRef.current) ytControllerRef.current.pause();
       if (resumePos > 0 && Math.abs(htmlAudioRef.current.currentTime - resumePos) > 2) {
         try {
           htmlAudioRef.current.currentTime = resumePos;
         } catch {}
       }
-      htmlAudioRef.current.play().catch(() => {});
+      htmlAudioRef.current.play().catch(() => {
+        if (!userPausedRef.current) {
+          playIndex(queueIndexRef.current, resumePos);
+        }
+      });
       setIsPlaying(true);
       if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
         navigator.mediaSession.playbackState = 'playing';
@@ -2103,12 +2107,13 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       try {
         navigator.mediaSession.setPositionState({
           duration: Math.max(1, activeDur),
-          playbackRate: 1,
+          playbackRate: isPlayingRef.current ? 1 : 0,
           position: clamped,
         });
       } catch {}
     }
   };
+  seekToRef.current = seekTo;
 
   const nextTrack = () => {
     hapticFeedback();
@@ -2122,6 +2127,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       playIndex(0);
     }
   };
+  nextTrackRef.current = nextTrack;
 
   const prevTrack = () => {
     hapticFeedback();
@@ -2135,6 +2141,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       seekTo(0);
     }
   };
+  prevTrackRef.current = prevTrack;
 
   const setVolume = (val: number) => {
     setVolumeState(val);

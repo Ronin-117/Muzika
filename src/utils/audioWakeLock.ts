@@ -93,9 +93,9 @@ class AudioFocusManager {
         this.osc = this.ctx.createOscillator();
         this.gain = this.ctx.createGain();
 
-        // Sub-audible carrier
-        this.osc.frequency.setValueAtTime(28, this.ctx.currentTime);
-        this.gain.gain.setValueAtTime(0.005, this.ctx.currentTime);
+        // Ultra-silent infrasonic carrier to keep WebAudio context active without audible output
+        this.osc.frequency.setValueAtTime(16, this.ctx.currentTime);
+        this.gain.gain.setValueAtTime(0.0008, this.ctx.currentTime);
 
         this.osc.connect(this.gain);
         this.gain.connect(this.ctx.destination);
