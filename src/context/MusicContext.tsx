@@ -952,6 +952,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const isPlayingRef = useRef<boolean>(isPlaying);
   isPlayingRef.current = isPlaying;
   const userPausedRef = useRef<boolean>(false);
+  const sessionStoppedRef = useRef<boolean>(true);
   const isTransitioningRef = useRef<boolean>(false);
   const playRequestIdRef = useRef<number>(0);
   const lastBlobUrlRef = useRef<string | null>(null);
@@ -964,10 +965,26 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const clearInterruptionStateRef = useRef<() => void>(() => {});
   const startInterruptionRecoveryRef = useRef<() => void>(() => {});
   const attemptInterruptionResumeRef = useRef<() => void>(() => {});
+  const pausePlaybackRef = useRef<() => void>(() => {});
+  const resumePlaybackRef = useRef<() => void>(() => {});
+  const stopPlaybackSessionRef = useRef<() => void>(() => {});
   const handleTrackEndedRef = useRef<() => void>(() => {});
   const playIndexRef = useRef<
     (index: number, startAtSecond?: number, overrideQueue?: Song[], overrideSong?: Song) => Promise<void>
   >(async () => {});
+
+  const assertPausedMediaSessionState = () => {
+    if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = sessionStoppedRef.current ? 'none' : 'paused';
+      window.setTimeout(() => {
+        if (!isPlayingRef.current && currentSongRef.current && !sessionStoppedRef.current) {
+          try {
+            navigator.mediaSession.playbackState = 'paused';
+          } catch {}
+        }
+      }, 120);
+    }
+  };
 
   const clearInterruptionState = () => {
     interruptedBySystemRef.current = false;
@@ -1104,7 +1121,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     const carrierUri = getSubAudibleAudioUri();
     const silentAudio = new Audio(carrierUri);
     silentAudio.loop = true;
-    silentAudio.volume = 0.02; // Threshold needed for Android AudioTrack mixer to keep hardware audio active
+    silentAudio.volume = 0.035; // Passes Android Chromium audibility floor while remaining infrasonic & inaudible
     (silentAudio as any).playsInline = true;
     silentAudio.setAttribute('playsinline', 'true');
     silentAudio.setAttribute('x-webkit-airplay', 'allow');
@@ -1113,6 +1130,13 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     const handleCarrierPlay = () => {
       if (interruptedBySystemRef.current && autoResumeOnCallRef.current && !userPausedRef.current) {
         attemptInterruptionResumeRef.current();
+        return;
+      }
+      // Keep MediaSession visually & AVRCP-logically 'paused' while carrier holds background notification alive
+      if (!isPlayingRef.current && currentSongRef.current && !sessionStoppedRef.current) {
+        if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+          navigator.mediaSession.playbackState = 'paused';
+        }
       }
     };
     silentAudio.addEventListener('play', handleCarrierPlay);
@@ -1141,6 +1165,9 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       } else {
         if (interruptedBySystemRef.current && autoResumeOnCallRef.current && !userPausedRef.current) {
           attemptInterruptionResumeRef.current();
+        } else if (!isPlayingRef.current && !sessionStoppedRef.current && currentSongRef.current) {
+          silentKeepAliveRef.current?.play().catch(() => {});
+          assertPausedMediaSessionState();
         }
       }
     });
@@ -1154,19 +1181,27 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     };
   }, []);
 
-  // Synchronize Audio Focus Wake-Lock whenever playback is active
+  // Synchronize Audio Focus & Carrier Wake-Lock while active OR while intentionally paused (keeps notification & Bluetooth controls alive)
   useEffect(() => {
     if (isPlaying) {
+      sessionStoppedRef.current = false;
       audioFocusManager.start();
       silentKeepAliveRef.current?.play().catch(() => {});
       if (typeof navigator !== 'undefined' && 'wakeLock' in navigator) {
         (navigator as any).wakeLock?.request('screen').catch(() => {});
       }
     } else {
-      silentKeepAliveRef.current?.pause();
-      // Do not forcibly suspend AudioContext during an external call interruption so OS 'running' transition still fires on call end
-      if (!interruptedBySystemRef.current && audioFocusManager.getState() !== 'interrupted') {
-        audioFocusManager.stop();
+      if (!sessionStoppedRef.current && currentSongRef.current && !interruptedBySystemRef.current) {
+        // Music is paused while app stays open -> hold Media Notification & headphone controls alive
+        audioFocusManager.start();
+        silentKeepAliveRef.current?.play().catch(() => {});
+        assertPausedMediaSessionState();
+      } else {
+        silentKeepAliveRef.current?.pause();
+        // Do not forcibly suspend AudioContext during an external call interruption so OS 'running' transition still fires on call end
+        if (!interruptedBySystemRef.current && audioFocusManager.getState() !== 'interrupted') {
+          audioFocusManager.stop();
+        }
       }
     }
   }, [isPlaying]);
@@ -1189,6 +1224,10 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         } else if (activeEngineRef.current === 'youtube') {
           ytControllerRef.current?.play();
         }
+      } else if (!sessionStoppedRef.current && currentSongRef.current && !interruptedBySystemRef.current) {
+        audioFocusManager.start();
+        silentKeepAliveRef.current?.play().catch(() => {});
+        assertPausedMediaSessionState();
       }
     };
 
@@ -1478,29 +1517,31 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   useEffect(() => {
     if (typeof window !== 'undefined' && 'mediaSession' in navigator) {
       if (currentSong) {
+        const coverSrc = offlineCacheService.getCachedCoverUrl(currentSong.id) || currentSong.thumbnailUrl;
         navigator.mediaSession.metadata = new MediaMetadata({
           title: currentSong.title,
           artist: currentSong.artist,
           album: currentSong.album || 'Muzika',
           artwork: [
-            { src: currentSong.thumbnailUrl, sizes: '96x96', type: 'image/jpeg' },
-            { src: currentSong.thumbnailUrl, sizes: '192x192', type: 'image/jpeg' },
-            { src: currentSong.thumbnailUrl, sizes: '512x512', type: 'image/jpeg' },
+            { src: coverSrc, sizes: '96x96', type: 'image/jpeg' },
+            { src: coverSrc, sizes: '192x192', type: 'image/jpeg' },
+            { src: coverSrc, sizes: '512x512', type: 'image/jpeg' },
           ],
         });
       }
 
-      navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+      navigator.mediaSession.playbackState =
+        !currentSong || sessionStoppedRef.current
+          ? 'none'
+          : isPlaying
+          ? 'playing'
+          : 'paused';
 
       navigator.mediaSession.setActionHandler('play', () => {
-        clearInterruptionState();
-        userPausedRef.current = false;
-        togglePlay();
+        resumePlaybackRef.current();
       });
       navigator.mediaSession.setActionHandler('pause', () => {
-        clearInterruptionState();
-        userPausedRef.current = true;
-        togglePlay();
+        pausePlaybackRef.current();
       });
       navigator.mediaSession.setActionHandler('previoustrack', () => prevTrack());
       navigator.mediaSession.setActionHandler('nexttrack', () => nextTrack());
@@ -1518,31 +1559,36 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         seekTo(Math.min(durationRef.current, currentTimeRef.current + skip));
       });
       navigator.mediaSession.setActionHandler('stop', () => {
-        clearInterruptionState();
-        userPausedRef.current = true;
-        setIsPlaying(false);
+        stopPlaybackSessionRef.current();
       });
     }
   }, [currentSong, isPlaying]);
 
-  // Throttled MediaSession position sync (once per ~1.5s to avoid 4x/sec bridge overhead)
+  // Sync MediaSession position (immediate on play/pause/track switch, throttled every ~1.5s while playing)
   const lastMediaSessionPosSyncRef = useRef<number>(0);
+  const lastMediaSessionPlayingRef = useRef<boolean>(isPlaying);
+  const lastMediaSessionSongIdRef = useRef<string | null>(currentSong?.id ?? null);
   useEffect(() => {
     if (typeof window === 'undefined' || !('mediaSession' in navigator) || !('setPositionState' in navigator.mediaSession)) {
       return;
     }
     if (duration <= 0) return;
     const now = Date.now();
-    if (now - lastMediaSessionPosSyncRef.current < 1500) return;
+    const stateOrTrackChanged =
+      lastMediaSessionPlayingRef.current !== isPlaying ||
+      lastMediaSessionSongIdRef.current !== (currentSong?.id ?? null);
+    if (!stateOrTrackChanged && now - lastMediaSessionPosSyncRef.current < 1500) return;
     lastMediaSessionPosSyncRef.current = now;
+    lastMediaSessionPlayingRef.current = isPlaying;
+    lastMediaSessionSongIdRef.current = currentSong?.id ?? null;
     try {
       navigator.mediaSession.setPositionState({
         duration: Math.max(1, duration),
-        playbackRate: 1,
+        playbackRate: isPlaying ? 1 : 0,
         position: Math.max(0, Math.min(currentTime, duration)),
       });
     } catch {}
-  }, [currentTime, duration]);
+  }, [currentTime, duration, isPlaying, currentSong?.id]);
 
   // Persist playback state throttled cleanly (avoids serializing large queues to localStorage 4x/sec)
   const lastSavedPlaybackSecRef = useRef<number>(-99);
@@ -1610,6 +1656,9 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         );
         StorageService.saveNamedQueues(flushed);
       }
+      sessionStoppedRef.current = true;
+      silentKeepAliveRef.current?.pause();
+      audioFocusManager.stop();
     };
 
     window.addEventListener('beforeunload', handleBeforeUnload);
@@ -1754,6 +1803,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
     const reqId = ++playRequestIdRef.current;
     isTransitioningRef.current = true;
+    sessionStoppedRef.current = false;
     userPausedRef.current = false;
     clearInterruptionState();
     audioFocusManager.start();
@@ -1906,6 +1956,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const playSong = (song: Song, customQueue?: Song[]) => {
     hapticFeedback();
     clearInterruptionState();
+    sessionStoppedRef.current = false;
     userPausedRef.current = false;
     audioFocusManager.start();
     if (htmlAudioRef.current) {
@@ -1939,60 +1990,99 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     playIndex(targetIndex, 0, newQueue, song);
   };
 
-  const togglePlay = () => {
-    hapticFeedback();
+  const pausePlayback = () => {
     clearInterruptionState();
-    if (!currentSong) {
-      if (queue.length > 0) playIndex(0);
+    userPausedRef.current = true;
+    sessionStoppedRef.current = false;
+
+    if (htmlAudioRef.current && activeEngineRef.current === 'html') {
+      htmlAudioRef.current.pause();
+    }
+    if (ytControllerRef.current && activeEngineRef.current === 'youtube') {
+      ytControllerRef.current.pause();
+    }
+
+    // Keep keep-alive carrier + AudioFocus active while app stays open so Notification Bar & headphone controls never vanish
+    if (currentSongRef.current) {
+      audioFocusManager.start();
+      silentKeepAliveRef.current?.play().catch(() => {});
+    }
+
+    setIsPlaying(false);
+    assertPausedMediaSessionState();
+  };
+  pausePlaybackRef.current = pausePlayback;
+
+  const resumePlayback = () => {
+    clearInterruptionState();
+    const curSong = currentSongRef.current;
+    if (!curSong) {
+      if (queueRef.current.length > 0) playIndex(0);
       return;
     }
 
-    if (isPlaying) {
-      // User explicitly requested pause
-      userPausedRef.current = true;
-      audioFocusManager.stop();
-      silentKeepAliveRef.current?.pause();
-      if (htmlAudioRef.current && activeEngineRef.current === 'html') {
-        htmlAudioRef.current.pause();
+    sessionStoppedRef.current = false;
+    userPausedRef.current = false;
+    audioFocusManager.start();
+    if (htmlAudioRef.current) {
+      webAudioEqualizer.ensureActive(htmlAudioRef.current, equalizerSettingsRef.current);
+    }
+    silentKeepAliveRef.current?.play().catch(() => {});
+    const resumePos = currentTimeRef.current > 0 ? currentTimeRef.current : 0;
+
+    if (activeEngineRef.current === 'html' && htmlAudioRef.current?.src) {
+      if (ytControllerRef.current) ytControllerRef.current.pause();
+      if (resumePos > 0 && Math.abs(htmlAudioRef.current.currentTime - resumePos) > 2) {
+        try {
+          htmlAudioRef.current.currentTime = resumePos;
+        } catch {}
       }
-      if (ytControllerRef.current && activeEngineRef.current === 'youtube') {
-        ytControllerRef.current.pause();
-      }
-      setIsPlaying(false);
+      htmlAudioRef.current.play().catch(() => {});
+      setIsPlaying(true);
       if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
-        navigator.mediaSession.playbackState = 'paused';
+        navigator.mediaSession.playbackState = 'playing';
+      }
+    } else if (activeEngineRef.current === 'youtube' && ytControllerRef.current) {
+      ytControllerRef.current.play();
+      setIsPlaying(true);
+      if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+        navigator.mediaSession.playbackState = 'playing';
       }
     } else {
-      // User explicitly requested resume
-      userPausedRef.current = false;
-      audioFocusManager.start();
-      if (htmlAudioRef.current) {
-        webAudioEqualizer.ensureActive(htmlAudioRef.current, equalizerSettingsRef.current);
-      }
-      silentKeepAliveRef.current?.play().catch(() => {});
-      const resumePos = currentTimeRef.current > 0 ? currentTimeRef.current : 0;
+      playIndex(queueIndexRef.current, resumePos);
+    }
+  };
+  resumePlaybackRef.current = resumePlayback;
 
-      if (activeEngineRef.current === 'html' && htmlAudioRef.current?.src) {
-        if (ytControllerRef.current) ytControllerRef.current.pause();
-        if (resumePos > 0 && Math.abs(htmlAudioRef.current.currentTime - resumePos) > 2) {
-          try {
-            htmlAudioRef.current.currentTime = resumePos;
-          } catch {}
-        }
-        htmlAudioRef.current.play().catch(() => {});
-        setIsPlaying(true);
-        if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
-          navigator.mediaSession.playbackState = 'playing';
-        }
-      } else if (activeEngineRef.current === 'youtube' && ytControllerRef.current) {
-        ytControllerRef.current.play();
-        setIsPlaying(true);
-        if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
-          navigator.mediaSession.playbackState = 'playing';
-        }
-      } else {
-        playIndex(queueIndex, resumePos);
-      }
+  const stopPlaybackSession = () => {
+    clearInterruptionState();
+    userPausedRef.current = true;
+    sessionStoppedRef.current = true;
+    if (htmlAudioRef.current && activeEngineRef.current === 'html') {
+      htmlAudioRef.current.pause();
+    }
+    if (ytControllerRef.current && activeEngineRef.current === 'youtube') {
+      ytControllerRef.current.pause();
+    }
+    silentKeepAliveRef.current?.pause();
+    audioFocusManager.stop();
+    setIsPlaying(false);
+    if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = 'none';
+    }
+  };
+  stopPlaybackSessionRef.current = stopPlaybackSession;
+
+  const togglePlay = () => {
+    hapticFeedback();
+    if (!currentSongRef.current) {
+      if (queueRef.current.length > 0) playIndex(0);
+      return;
+    }
+    if (isPlayingRef.current) {
+      pausePlayback();
+    } else {
+      resumePlayback();
     }
   };
 
@@ -2274,15 +2364,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       setSleepTimerSeconds((prev) => {
         if (prev === null || prev <= 1) {
           if (sleepTimerIntervalRef.current) clearInterval(sleepTimerIntervalRef.current);
-          clearInterruptionState();
-          userPausedRef.current = true;
-          // Pause playback
-          if (currentSong?.source === 'youtube') {
-            ytControllerRef.current?.pause();
-          } else if (htmlAudioRef.current) {
-            htmlAudioRef.current.pause();
-          }
-          setIsPlaying(false);
+          stopPlaybackSessionRef.current();
           return null;
         }
         return prev - 1;

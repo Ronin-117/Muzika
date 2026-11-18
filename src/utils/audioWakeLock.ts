@@ -36,10 +36,13 @@ export function getSubAudibleAudioUri(): string {
   writeString(view, 36, 'data');
   view.setUint32(40, numSamples * 2, true);
 
-  // Fill with soft 30Hz carrier tone that satisfies OS audio active mixer without audible distortion
+  // Fill with 18Hz infrasonic carrier (exact integer cycles/sec for zero-click loop).
+  // Paired with volume 0.035 (~ -56 dBFS), it stays above browser silence detectors
+  // so Android/iOS keep the Media Notification & Bluetooth controls alive while paused,
+  // while remaining completely below human hearing & speaker/headphone reproduction.
   for (let i = 0; i < numSamples; i++) {
     const t = i / sampleRate;
-    const sample = Math.sin(2 * Math.PI * 30 * t) * 600;
+    const sample = Math.sin(2 * Math.PI * 18 * t) * 2000;
     view.setInt16(44 + i * 2, sample, true);
   }
 
