@@ -207,6 +207,8 @@ interface MusicContextType {
   autoSyncSong: (song: Song) => Promise<Song | null>;
   toastMessage: string | null;
   showToast: (message: string) => void;
+  cacheRestoreProgress: { active: boolean; total: number; completed: number; justFinished?: boolean } | null;
+  registerBackHandler: (id: string, onBack: () => void) => () => void;
 }
 
 const MusicContext = createContext<MusicContextType | null>(null);
@@ -227,37 +229,50 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     return 'home';
   });
 
-  const pushHistoryLayer = useCallback((minDepth: number) => {
+  const historySeqRef = useRef<number>(1);
+  const entriesAboveRootRef = useRef<number>(1);
+  const localBackHandlersRef = useRef<{ id: string; close: () => void }[]>([]);
+
+  const pushHistoryLayer = useCallback(() => {
     if (typeof window === 'undefined') return;
     try {
-      const currentDepth = typeof window.history.state?.muzikaDepth === 'number'
-        ? window.history.state.muzikaDepth
-        : 0;
+      const seq = ++historySeqRef.current;
       const hasUserActivation =
         typeof (navigator as any).userActivation !== 'undefined'
           ? !!(navigator as any).userActivation?.isActive
           : true;
 
-      if (currentDepth < minDepth) {
-        const cappedDepth = Math.min(4, minDepth);
-        window.history.pushState(
-          { muzikaApp: true, muzikaDepth: cappedDepth, ua: hasUserActivation },
-          ''
-        );
-        if (hasUserActivation) {
-          trapActivatedRef.current = true;
-        }
+      window.history.pushState(
+        { muzikaLayer: true, seq, ua: hasUserActivation },
+        ''
+      );
+      entriesAboveRootRef.current += 1;
+      if (hasUserActivation) {
+        trapActivatedRef.current = true;
       }
     } catch {}
   }, []);
 
+  const registerBackHandler = useCallback((id: string, closeFn: () => void) => {
+    localBackHandlersRef.current = [
+      ...localBackHandlersRef.current.filter((h) => h.id !== id),
+      { id, close: closeFn },
+    ];
+    pushHistoryLayer();
+    return () => {
+      localBackHandlersRef.current = localBackHandlersRef.current.filter((h) => h.id !== id);
+    };
+  }, [pushHistoryLayer]);
+
   const setActiveTab = useCallback((tab: 'home' | 'explore' | 'search' | 'library' | 'rewind' | 'settings') => {
+    const prevTab = navStateRef.current.activeTab;
     setActiveTabState(tab);
+    navStateRef.current.activeTab = tab;
     if (typeof window !== 'undefined') {
       localStorage.setItem('muzika_active_tab', tab);
     }
-    if (tab !== 'home') {
-      pushHistoryLayer(2);
+    if (tab !== 'home' && tab !== prevTab) {
+      pushHistoryLayer();
     }
   }, [pushHistoryLayer]);
 
@@ -282,6 +297,13 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [syncTargetSong, setSyncTargetSongState] = useState<Song | null>(null);
   const [previewingSongId, setPreviewingSongId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [cacheRestoreProgress, setCacheRestoreProgress] = useState<{
+    active: boolean;
+    total: number;
+    completed: number;
+    justFinished?: boolean;
+  } | null>(null);
+  const restoreClearTimerRef = useRef<number | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const trapActivatedRef = useRef<boolean>(false);
   const isExitingAppRef = useRef<boolean>(false);
@@ -295,68 +317,82 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   };
 
   const setIsPlayerOpen = useCallback((open: boolean) => {
+    if (open && !navStateRef.current.isPlayerOpen) pushHistoryLayer();
+    navStateRef.current.isPlayerOpen = open;
     setIsPlayerOpenState(open);
-    if (open) pushHistoryLayer(3);
   }, [pushHistoryLayer]);
   const setIsQueueOpen = useCallback((open: boolean) => {
+    if (open && !navStateRef.current.isQueueOpen) pushHistoryLayer();
+    navStateRef.current.isQueueOpen = open;
     setIsQueueOpenState(open);
-    if (open) pushHistoryLayer(4);
   }, [pushHistoryLayer]);
   const setIsEqualizerOpen = useCallback((open: boolean) => {
+    if (open && !navStateRef.current.isEqualizerOpen) pushHistoryLayer();
+    navStateRef.current.isEqualizerOpen = open;
     setIsEqualizerOpenState(open);
-    if (open) pushHistoryLayer(4);
   }, [pushHistoryLayer]);
   const setIsSleepTimerOpen = useCallback((open: boolean) => {
+    if (open && !navStateRef.current.isSleepTimerOpen) pushHistoryLayer();
+    navStateRef.current.isSleepTimerOpen = open;
     setIsSleepTimerOpenState(open);
-    if (open) pushHistoryLayer(4);
   }, [pushHistoryLayer]);
   const setIsSongInfoOpen = useCallback((open: boolean) => {
+    if (open && !navStateRef.current.isSongInfoOpen) pushHistoryLayer();
+    navStateRef.current.isSongInfoOpen = open;
     setIsSongInfoOpenState(open);
-    if (open) pushHistoryLayer(4);
   }, [pushHistoryLayer]);
   const setIsPWAInstallModalOpen = useCallback((open: boolean) => {
+    if (open && !navStateRef.current.isPWAInstallModalOpen) pushHistoryLayer();
+    navStateRef.current.isPWAInstallModalOpen = open;
     setIsPWAInstallModalOpenState(open);
-    if (open) pushHistoryLayer(4);
   }, [pushHistoryLayer]);
   const setIsRiplayImportOpen = useCallback((open: boolean) => {
+    if (open && !navStateRef.current.isRiplayImportOpen) pushHistoryLayer();
+    navStateRef.current.isRiplayImportOpen = open;
     setIsRiplayImportOpenState(open);
-    if (open) pushHistoryLayer(4);
   }, [pushHistoryLayer]);
   const setSelectedPlaylist = useCallback((playlist: Playlist | null) => {
+    if (playlist && !navStateRef.current.selectedPlaylist) pushHistoryLayer();
+    navStateRef.current.selectedPlaylist = playlist;
     setSelectedPlaylistState(playlist);
-    if (playlist) pushHistoryLayer(2);
   }, [pushHistoryLayer]);
   const setSelectedArtistId = useCallback((artistId: string | null) => {
+    if (artistId && !navStateRef.current.selectedArtistId) pushHistoryLayer();
+    navStateRef.current.selectedArtistId = artistId;
     setSelectedArtistIdState(artistId);
     if (!artistId) setSelectedArtist(null);
-    else pushHistoryLayer(2);
   }, [pushHistoryLayer]);
   const setSelectedAlbum = useCallback((album: Album | null) => {
+    if (album && !navStateRef.current.selectedAlbum) pushHistoryLayer();
+    navStateRef.current.selectedAlbum = album;
     setSelectedAlbumState(album);
-    if (album) pushHistoryLayer(2);
   }, [pushHistoryLayer]);
   const setAddToPlaylistTargetSong = useCallback((song: Song | null) => {
+    if (song && !navStateRef.current.addToPlaylistTargetSong) pushHistoryLayer();
+    navStateRef.current.addToPlaylistTargetSong = song;
     setAddToPlaylistTargetSongState(song);
-    if (song) pushHistoryLayer(4);
   }, [pushHistoryLayer]);
   const setSongOptionsMenuTarget = useCallback((target: { song: Song; queueContext?: Song[] } | null) => {
+    if (target && !navStateRef.current.songOptionsMenuTarget) pushHistoryLayer();
+    navStateRef.current.songOptionsMenuTarget = target;
     setSongOptionsMenuTargetState(target);
-    if (target) pushHistoryLayer(4);
   }, [pushHistoryLayer]);
   const setSyncTargetSong = useCallback((song: Song | null) => {
+    if (song && !navStateRef.current.syncTargetSong) pushHistoryLayer();
+    navStateRef.current.syncTargetSong = song;
     setSyncTargetSongState(song);
-    if (song) pushHistoryLayer(4);
   }, [pushHistoryLayer]);
 
   const setIsExitConfirmOpen = useCallback((open: boolean) => {
     setIsExitConfirmOpenState(open);
+    navStateRef.current.isExitConfirmOpen = open;
     if (!open && !isExitingAppRef.current) {
-      // User dismissed "Exit Muzika?" (tapped Stay / Back) under user gesture -> re-arm Home exit guard
       if (typeof window !== 'undefined') {
         try {
-          const depth = typeof window.history.state?.muzikaDepth === 'number' ? window.history.state.muzikaDepth : 0;
-          if (depth < 1 || !trapActivatedRef.current) {
-            window.history.pushState({ muzikaApp: true, muzikaDepth: 1, ua: true }, '');
+          if (window.history.state?.muzikaRoot === true || entriesAboveRootRef.current < 1) {
+            const seq = ++historySeqRef.current;
+            window.history.pushState({ muzikaGuard: true, seq, ua: true }, '');
+            entriesAboveRootRef.current = 1;
             trapActivatedRef.current = true;
           }
         } catch {}
@@ -372,11 +408,8 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         window.close();
       } catch {}
       try {
-        const depth = typeof window.history.state?.muzikaDepth === 'number'
-          ? window.history.state.muzikaDepth
-          : 1;
-        // Walk back past our app entries cleanly
-        window.history.go(-(depth + 1));
+        const steps = Math.max(1, entriesAboveRootRef.current + 1);
+        window.history.go(-steps);
         window.setTimeout(() => {
           try {
             window.history.back();
@@ -753,15 +786,19 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const ensureHistoryTrap = () => {
     if (typeof window !== 'undefined') {
       try {
-        const hasUserActivation =
-          typeof (navigator as any).userActivation !== 'undefined'
-            ? !!(navigator as any).userActivation?.isActive
-            : false;
-        window.history.pushState(
-          { muzikaApp: true, muzikaDepth: 1, ua: hasUserActivation },
-          ''
-        );
-        trapActivatedRef.current = hasUserActivation;
+        if (window.history.state?.muzikaRoot === true || entriesAboveRootRef.current < 1) {
+          const seq = ++historySeqRef.current;
+          const hasUserActivation =
+            typeof (navigator as any).userActivation !== 'undefined'
+              ? !!(navigator as any).userActivation?.isActive
+              : false;
+          window.history.pushState(
+            { muzikaGuard: true, seq, ua: hasUserActivation },
+            ''
+          );
+          entriesAboveRootRef.current = 1;
+          trapActivatedRef.current = hasUserActivation;
+        }
       } catch {}
     }
   };
@@ -770,121 +807,169 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   useEffect(() => {
     if (typeof window !== 'undefined') {
       try {
-        window.history.replaceState({ muzikaRoot: true, muzikaDepth: 0 }, '');
-        window.history.pushState({ muzikaApp: true, muzikaDepth: 1, ua: false }, '');
+        window.history.replaceState({ muzikaRoot: true, seq: 0 }, '');
+        window.history.pushState({ muzikaGuard: true, seq: 1 }, '');
+        entriesAboveRootRef.current = 1;
         trapActivatedRef.current = false;
       } catch {}
     }
 
-    // Chromium/Android History Manipulation Intervention ignores non-user-activated pushState
-    // entries when pressing Back. Promote our guard entry on real user gestures so Back on Home
-    // ALWAYS fires popstate and presents ExitConfirmModal instead of quitting immediately.
+    // Only re-push guard on gesture if history actually fell back to root (avoids double-push on same tap)
     const activateTrapOnGesture = () => {
       if (isExitingAppRef.current) return;
       if (typeof window === 'undefined') return;
       if (navStateRef.current.isExitConfirmOpen) return;
 
+      trapActivatedRef.current = true;
       const curState = window.history.state;
-      const curDepth = typeof curState?.muzikaDepth === 'number' ? curState.muzikaDepth : 0;
-
-      if (!trapActivatedRef.current || curDepth < 1 || !curState?.ua) {
-        trapActivatedRef.current = true;
+      if (curState?.muzikaRoot === true || (!curState?.muzikaGuard && !curState?.muzikaLayer)) {
         try {
-          if (curDepth <= 1) {
-            window.history.replaceState({ muzikaRoot: true, muzikaDepth: 0 }, '');
-            window.history.pushState({ muzikaApp: true, muzikaDepth: 1, ua: true }, '');
-          } else {
-            window.history.pushState(
-              { muzikaApp: true, muzikaDepth: curDepth, ua: true },
-              ''
-            );
-          }
+          const seq = ++historySeqRef.current;
+          window.history.pushState({ muzikaGuard: true, seq, ua: true }, '');
+          entriesAboveRootRef.current += 1;
+        } catch {}
+      }
+    };
+
+    const keepInsideAppGuard = () => {
+      if (typeof window === 'undefined') return;
+      if (window.history.state?.muzikaRoot === true || entriesAboveRootRef.current < 1) {
+        try {
+          const seq = ++historySeqRef.current;
+          window.history.pushState({ muzikaGuard: true, seq }, '');
+          entriesAboveRootRef.current = 1;
+          trapActivatedRef.current = false;
         } catch {}
       }
     };
 
     const handlePopState = () => {
       if (isExitingAppRef.current) return;
+      entriesAboveRootRef.current = Math.max(0, entriesAboveRootRef.current - 1);
       const state = navStateRef.current;
 
       // 1. If Exit confirmation modal is open, back button dismisses it
       if (state.isExitConfirmOpen) {
         setIsExitConfirmOpenState(false);
+        navStateRef.current.isExitConfirmOpen = false;
         ensureHistoryTrap();
         return;
       }
 
-      // 2. Modals & sheets in top-most z-index order
+      // 2. Highest-priority global quick-action modals
       if (state.syncTargetSong) {
         setSyncTargetSongState(null);
-        return;
-      }
-      if (state.addToPlaylistTargetSong) {
-        setAddToPlaylistTargetSongState(null);
+        navStateRef.current.syncTargetSong = null;
+        keepInsideAppGuard();
         return;
       }
       if (state.songOptionsMenuTarget) {
         setSongOptionsMenuTargetState(null);
+        navStateRef.current.songOptionsMenuTarget = null;
+        keepInsideAppGuard();
         return;
       }
-      if (state.isSongInfoOpen) {
-        setIsSongInfoOpenState(false);
+
+      // 3. Any open local dialog / sheet registered via useBackHandler (Create Playlist, Queue Selector, Delete Confirm, Queue Options, AddToPlaylist Create Form)
+      if (localBackHandlersRef.current.length > 0) {
+        const topHandler = localBackHandlersRef.current[localBackHandlersRef.current.length - 1];
+        localBackHandlersRef.current = localBackHandlersRef.current.slice(0, -1);
+        try {
+          topHandler.close();
+        } catch {}
+        keepInsideAppGuard();
         return;
       }
-      if (state.isQueueOpen) {
-        setIsQueueOpenState(false);
+
+      // 4. Global modals & sheets in top-most z-index order
+      if (state.addToPlaylistTargetSong) {
+        setAddToPlaylistTargetSongState(null);
+        navStateRef.current.addToPlaylistTargetSong = null;
+        keepInsideAppGuard();
         return;
       }
       if (state.isEqualizerOpen) {
         setIsEqualizerOpenState(false);
+        navStateRef.current.isEqualizerOpen = false;
+        keepInsideAppGuard();
+        return;
+      }
+      if (state.isSongInfoOpen) {
+        setIsSongInfoOpenState(false);
+        navStateRef.current.isSongInfoOpen = false;
+        keepInsideAppGuard();
         return;
       }
       if (state.isSleepTimerOpen) {
         setIsSleepTimerOpenState(false);
+        navStateRef.current.isSleepTimerOpen = false;
+        keepInsideAppGuard();
         return;
       }
       if (state.isRiplayImportOpen) {
         setIsRiplayImportOpenState(false);
+        navStateRef.current.isRiplayImportOpen = false;
+        keepInsideAppGuard();
         return;
       }
       if (state.isPWAInstallModalOpen) {
         setIsPWAInstallModalOpenState(false);
+        navStateRef.current.isPWAInstallModalOpen = false;
+        keepInsideAppGuard();
+        return;
+      }
+      if (state.isQueueOpen) {
+        setIsQueueOpenState(false);
+        navStateRef.current.isQueueOpen = false;
+        keepInsideAppGuard();
         return;
       }
 
-      // 3. Full-screen Player sits above Entity Detail screens (z-50 > z-40)
+      // 5. Full-screen Player sits above Entity Detail screens (z-50 > z-40)
       if (state.isPlayerOpen) {
         setIsPlayerOpenState(false);
+        navStateRef.current.isPlayerOpen = false;
+        keepInsideAppGuard();
         return;
       }
 
-      // 4. Entity Detail screens
+      // 6. Entity Detail screens
       if (state.selectedPlaylist) {
         setSelectedPlaylistState(null);
+        navStateRef.current.selectedPlaylist = null;
+        keepInsideAppGuard();
         return;
       }
       if (state.selectedArtistId || state.selectedArtist) {
         setSelectedArtistIdState(null);
         setSelectedArtist(null);
+        navStateRef.current.selectedArtistId = null;
+        navStateRef.current.selectedArtist = null;
+        keepInsideAppGuard();
         return;
       }
       if (state.selectedAlbum) {
         setSelectedAlbumState(null);
+        navStateRef.current.selectedAlbum = null;
+        keepInsideAppGuard();
         return;
       }
 
-      // 5. If on another tab, navigate back to Home screen
+      // 7. If on another tab, navigate back to Home screen
       if (state.activeTab !== 'home') {
         setActiveTabState('home');
+        navStateRef.current.activeTab = 'home';
         if (typeof window !== 'undefined') {
           localStorage.setItem('muzika_active_tab', 'home');
         }
+        keepInsideAppGuard();
         return;
       }
 
-      // 6. We are on Home with no modals open: Prompt user before quitting!
+      // 8. We are on Home with no modals/dialogs open: Prompt user before quitting!
       trapActivatedRef.current = false;
       setIsExitConfirmOpenState(true);
+      navStateRef.current.isExitConfirmOpen = true;
     };
 
     window.addEventListener('pointerdown', activateTrapOnGesture, { capture: true, passive: true });
@@ -924,10 +1009,39 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       setCachingSongIds(ids);
     });
 
+    const unsubRestore = offlineCacheService.subscribeRestore((evt) => {
+      if (!isMounted) return;
+      if (restoreClearTimerRef.current) {
+        window.clearTimeout(restoreClearTimerRef.current);
+        restoreClearTimerRef.current = null;
+      }
+      if (evt.phase === 'start' || evt.phase === 'progress') {
+        if (evt.total > 0) {
+          setCacheRestoreProgress({ active: true, total: evt.total, completed: evt.completed });
+        }
+      } else if (evt.phase === 'done') {
+        if (evt.completed > 0) {
+          setCacheRestoreProgress({
+            active: false,
+            total: evt.total,
+            completed: evt.completed,
+            justFinished: true,
+          });
+          restoreClearTimerRef.current = window.setTimeout(() => {
+            if (isMounted) setCacheRestoreProgress(null);
+          }, 2800);
+        } else {
+          setCacheRestoreProgress(null);
+        }
+      }
+    });
+
     return () => {
       isMounted = false;
+      if (restoreClearTimerRef.current) window.clearTimeout(restoreClearTimerRef.current);
       unsub();
       unsubCaching();
+      unsubRestore();
     };
   }, []);
 
@@ -3029,6 +3143,8 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           autoSyncSong,
           toastMessage,
           showToast,
+          cacheRestoreProgress,
+          registerBackHandler,
           enableMultipleQueues,
           setEnableMultipleQueues,
           queues,
@@ -3056,3 +3172,15 @@ export const useMusic = () => {
   }
   return context;
 };
+
+export function useBackHandler(isOpen: boolean, onBack: () => void) {
+  const { registerBackHandler } = useMusic();
+  const idRef = useRef(`bh-${Math.random().toString(36).slice(2, 10)}`);
+  const onBackRef = useRef(onBack);
+  onBackRef.current = onBack;
+
+  useEffect(() => {
+    if (!isOpen) return;
+    return registerBackHandler(idRef.current, () => onBackRef.current());
+  }, [isOpen, registerBackHandler]);
+}

@@ -1,6 +1,6 @@
 import React from 'react';
 import { useMusic } from '../../context/MusicContext';
-import { Sliders, Moon, Smartphone, Search, Music } from 'lucide-react';
+import { Sliders, Moon, Smartphone, Search, Music, RefreshCw, ShieldCheck } from 'lucide-react';
 import { usePWAInstall } from '../../hooks/usePWAInstall';
 
 export const Header: React.FC = () => {
@@ -12,6 +12,8 @@ export const Header: React.FC = () => {
     setIsPWAInstallModalOpen,
     setActiveTab,
     hapticFeedback,
+    cacheRestoreProgress,
+    showToast,
   } = useMusic();
   const { isInstalled } = usePWAInstall();
 
@@ -49,6 +51,40 @@ export const Header: React.FC = () => {
 
       {/* Header Actions */}
       <div className="flex items-center gap-1.5 sm:gap-2">
+        {/* Compact Self-Healing Cache Indicator (symbol-only, uncluttered) */}
+        {cacheRestoreProgress && (
+          <button
+            type="button"
+            onClick={() => {
+              hapticFeedback();
+              if (cacheRestoreProgress.active) {
+                showToast(
+                  `Self-healing offline cache (${cacheRestoreProgress.completed}/${cacheRestoreProgress.total})`
+                );
+              } else {
+                showToast(
+                  `Restored ${cacheRestoreProgress.completed} offline track${
+                    cacheRestoreProgress.completed > 1 ? 's' : ''
+                  }`
+                );
+              }
+            }}
+            className="p-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 transition active:scale-95"
+            title={
+              cacheRestoreProgress.active
+                ? `Self-healing offline cache (${cacheRestoreProgress.completed}/${cacheRestoreProgress.total})`
+                : 'Offline cache restored'
+            }
+            aria-label="Offline cache self-healing status"
+          >
+            {cacheRestoreProgress.active ? (
+              <RefreshCw className="w-4 h-4 animate-spin" />
+            ) : (
+              <ShieldCheck className="w-4 h-4" />
+            )}
+          </button>
+        )}
+
         {/* Search icon shortcut */}
         <button
           onClick={() => {

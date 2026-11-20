@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useMusic } from '../../context/MusicContext';
+import { useMusic, useBackHandler } from '../../context/MusicContext';
 import { ArrowLeft, Play, Shuffle, Disc, Heart, CheckCircle2, Bookmark, Check, Loader2, DownloadCloud, ListPlus, ListOrdered, ListVideo, X } from 'lucide-react';
 import { OnlineMusicService } from '../../services/onlineMusicService';
 import { Song } from '../../types/music';
@@ -30,6 +30,8 @@ export const AlbumDetailModal: React.FC = () => {
   const [fetchedSongs, setFetchedSongs] = useState<Song[]>([]);
   const [isLoadingTracks, setIsLoadingTracks] = useState(false);
   const [showQueueOptions, setShowQueueOptions] = useState(false);
+
+  useBackHandler(!!selectedAlbum && showQueueOptions, () => setShowQueueOptions(false));
 
   useEffect(() => {
     if (!selectedAlbum) {

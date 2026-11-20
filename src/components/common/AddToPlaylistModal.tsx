@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useMusic } from '../../context/MusicContext';
+import { useMusic, useBackHandler } from '../../context/MusicContext';
 import { X, Plus, Check, ListMusic, Music } from 'lucide-react';
 
 export const AddToPlaylistModal: React.FC = () => {
@@ -18,6 +18,8 @@ export const AddToPlaylistModal: React.FC = () => {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newDesc, setNewDesc] = useState('');
+
+  useBackHandler(!!addToPlaylistTargetSong && showCreateForm, () => setShowCreateForm(false));
 
   if (!addToPlaylistTargetSong) return null;
 

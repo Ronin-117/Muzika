@@ -1,5 +1,5 @@
 import React, { useState, useRef, useMemo } from 'react';
-import { useMusic } from '../../context/MusicContext';
+import { useMusic, useBackHandler } from '../../context/MusicContext';
 import {
   FolderHeart,
   ListPlus,
@@ -65,6 +65,8 @@ export const LibraryScreen: React.FC = () => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newDesc, setNewDesc] = useState('');
+
+  useBackHandler(showCreateModal, () => setShowCreateModal(false));
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -661,8 +663,12 @@ export const LibraryScreen: React.FC = () => {
 
       {/* Create Playlist Modal */}
       {showCreateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+        <div
+          onClick={() => setShowCreateModal(false)}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+        >
           <form
+            onClick={(e) => e.stopPropagation()}
             onSubmit={handleCreate}
             className="w-full max-w-sm rounded-3xl p-6 shadow-2xl space-y-4 border border-white/10"
             style={{ backgroundColor: themeColors.background1 }}

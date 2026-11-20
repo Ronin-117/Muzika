@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useMusic } from '../../context/MusicContext';
+import { useMusic, useBackHandler } from '../../context/MusicContext';
 import {
   Play,
   Shuffle,
@@ -41,6 +41,8 @@ export const PlaylistDetailModal: React.FC = () => {
 
   const [onlyOffline, setOnlyOffline] = useState(false);
   const [showQueueOptions, setShowQueueOptions] = useState(false);
+
+  useBackHandler(!!selectedPlaylist && showQueueOptions, () => setShowQueueOptions(false));
 
   if (!selectedPlaylist) return null;
 

@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { useMusic } from '../../context/MusicContext';
+import { useMusic, useBackHandler } from '../../context/MusicContext';
 import { Trash2, Music2, Play, Volume2, LocateFixed, Layers, Plus, Edit2, Check, X, ChevronDown, MoreVertical } from 'lucide-react';
 
 export const QueueView: React.FC = () => {
@@ -33,6 +33,13 @@ export const QueueView: React.FC = () => {
   const [editingQueueId, setEditingQueueId] = useState<string | null>(null);
   const [editQueueName, setEditQueueName] = useState('');
   const [deletingQueue, setDeletingQueue] = useState<{ id: string; name: string } | null>(null);
+
+  useBackHandler(isSelectorOpen, () => {
+    setIsSelectorOpen(false);
+    setDeletingQueue(null);
+    setIsCreating(false);
+  });
+  useBackHandler(!!deletingQueue, () => setDeletingQueue(null));
 
   // Automatically scroll currently playing song into view
   useEffect(() => {

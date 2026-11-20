@@ -2,9 +2,13 @@ import { Song } from '../types/music';
 import { OnlineMusicService } from './onlineMusicService';
 
 const DB_NAME = 'muzika_offline_db';
-const DB_VERSION = 2; // Incremented to version 2 to clean up any past synthetic audio blobs
+const DB_VERSION = 2;
 const STORE_SONGS = 'cached_tracks';
 const STORE_CONFIG = 'cache_config';
+
+const MANIFEST_STORAGE_KEY = 'muzika_cached_manifest_v1';
+const CONFIG_STORAGE_KEY = 'muzika_cache_config_v1';
+const LEGACY_MEDIA_CACHE_KEY = 'muzika-media-v1';
 
 export interface CachedTrackRecord {
   id: string;
@@ -14,6 +18,18 @@ export interface CachedTrackRecord {
   cachedAt: number;
   lastAccessedAt: number;
   sizeBytes: number;
+}
+
+interface CachedManifestEntry {
+  id: string;
+  cachedAt: number;
+  song: Song;
+}
+
+export interface CacheRestoreEvent {
+  phase: 'start' | 'progress' | 'done';
+  total: number;
+  completed: number;
 }
 
 export type RetentionDuration = 'forever' | '30d' | '14d' | '7d';
@@ -30,6 +46,35 @@ export const DEFAULT_CACHE_CONFIG: CacheConfig = {
   autoCacheOnPlay: true,
 };
 
+function sanitizeSongMetadata(song: Song, fallbackThumb?: string): Song {
+  let thumbnailUrl = song.thumbnailUrl;
+  if (!thumbnailUrl || thumbnailUrl.startsWith('blob:') || thumbnailUrl.startsWith('data:')) {
+    if (fallbackThumb && fallbackThumb.startsWith('http')) {
+      thumbnailUrl = fallbackThumb;
+    } else {
+      const vidId = song.youtubeId || (song.id.startsWith('yt-') ? song.id.replace('yt-', '') : '');
+      if (vidId && !vidId.startsWith('online-') && !vidId.startsWith('local-')) {
+        thumbnailUrl = `https://i.ytimg.com/vi/${vidId}/hqdefault.jpg`;
+      } else {
+        thumbnailUrl = '';
+      }
+    }
+  }
+
+  return {
+    id: song.id,
+    title: song.title,
+    artist: song.artist,
+    album: song.album,
+    duration: song.duration,
+    thumbnailUrl,
+    youtubeId: song.youtubeId,
+    source: song.source,
+    artistId: song.artistId,
+    albumId: song.albumId,
+  };
+}
+
 class OfflineCacheService {
   private dbPromise: Promise<IDBDatabase> | null = null;
   private cachedIds: Set<string> = new Set();
@@ -38,21 +83,37 @@ class OfflineCacheService {
   private coverUrlCache: Map<string, string> = new Map();
   private listeners: (() => void)[] = [];
   private cachingListeners: ((ids: Set<string>) => void)[] = [];
+  private restoreListeners: ((event: CacheRestoreEvent) => void)[] = [];
+
+  private intentionallyRemovedIds: Set<string> = new Set();
+  private restoreAttemptedSessionIds: Set<string> = new Set();
+  private lastRestoreAttemptAt = 0;
+  private restoreInFlight: Promise<number> | null = null;
+  private persistenceRequestedThisSession = false;
 
   constructor() {
     if (typeof window !== 'undefined' && 'indexedDB' in window) {
-      this.initDB().then(() => {
-        this.refreshCachedIds();
-        this.requestPersistence().catch(() => {});
-        setTimeout(() => {
-          this.autoRepairCorruptedTracks().catch(() => {});
-          this.backfillMissingCovers().catch(() => {});
-        }, 4000);
-      });
+      this.initDB()
+        .then(async () => {
+          await this.refreshCachedIds();
+          this.requestPersistence().catch(() => {});
+          setTimeout(() => {
+            this.restoreMissingTracksFromManifest().catch(() => {});
+            this.autoRepairCorruptedTracks().catch(() => {});
+            this.backfillMissingCovers().catch(() => {});
+          }, 2500);
+        })
+        .catch(() => {});
 
       window.addEventListener('online', () => {
-        this.autoRepairCorruptedTracks().catch(() => {});
-        this.backfillMissingCovers().catch(() => {});
+        if (Date.now() - this.lastRestoreAttemptAt > 60_000) {
+          this.restoreAttemptedSessionIds.clear();
+        }
+        setTimeout(() => {
+          this.restoreMissingTracksFromManifest().catch(() => {});
+          this.autoRepairCorruptedTracks().catch(() => {});
+          this.backfillMissingCovers().catch(() => {});
+        }, 1200);
       });
     }
   }
@@ -65,14 +126,15 @@ class OfflineCacheService {
 
       request.onupgradeneeded = (e) => {
         const db = (e.target as IDBOpenDBRequest).result;
-        // Purge old store to wipe any legacy synthetic oscillator tones completely
-        if (db.objectStoreNames.contains(STORE_SONGS)) {
+        // Only migrate legacy v1 stores (pre-real-audio-blob schema); preserve v2+ records
+        if (e.oldVersion > 0 && e.oldVersion < 2 && db.objectStoreNames.contains(STORE_SONGS)) {
           db.deleteObjectStore(STORE_SONGS);
         }
-        const store = db.createObjectStore(STORE_SONGS, { keyPath: 'id' });
-        store.createIndex('cachedAt', 'cachedAt', { unique: false });
-        store.createIndex('lastAccessedAt', 'lastAccessedAt', { unique: false });
-
+        if (!db.objectStoreNames.contains(STORE_SONGS)) {
+          const store = db.createObjectStore(STORE_SONGS, { keyPath: 'id' });
+          store.createIndex('cachedAt', 'cachedAt', { unique: false });
+          store.createIndex('lastAccessedAt', 'lastAccessedAt', { unique: false });
+        }
         if (!db.objectStoreNames.contains(STORE_CONFIG)) {
           db.createObjectStore(STORE_CONFIG, { keyPath: 'key' });
         }
@@ -98,7 +160,111 @@ class OfflineCacheService {
     return this.dbPromise;
   }
 
-  // Subscribe to cache change events
+  // ---- Durable localStorage Manifest (survives OS/browser Quota/IndexedDB sweeps) ----
+
+  private readManifest(): Record<string, CachedManifestEntry> {
+    if (typeof window === 'undefined') return {};
+    try {
+      const raw = localStorage.getItem(MANIFEST_STORAGE_KEY);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, CachedManifestEntry>;
+      }
+      return {};
+    } catch {
+      return {};
+    }
+  }
+
+  private writeManifest(manifest: Record<string, CachedManifestEntry>): void {
+    if (typeof window === 'undefined') return;
+    try {
+      localStorage.setItem(MANIFEST_STORAGE_KEY, JSON.stringify(manifest));
+    } catch {
+      // Ignore Safari private mode or localStorage quota edge errors
+    }
+  }
+
+  private upsertManifestEntry(song: Song, cachedAt: number): void {
+    if (!song?.id || song.source === 'local' || song.id.startsWith('local-')) return;
+    const manifest = this.readManifest();
+    const prevThumb = manifest[song.id]?.song?.thumbnailUrl;
+    manifest[song.id] = {
+      id: song.id,
+      cachedAt: manifest[song.id]?.cachedAt || cachedAt || Date.now(),
+      song: sanitizeSongMetadata(song, prevThumb),
+    };
+    this.writeManifest(manifest);
+  }
+
+  private removeManifestEntry(songId: string): void {
+    const manifest = this.readManifest();
+    if (songId in manifest) {
+      delete manifest[songId];
+      this.writeManifest(manifest);
+    }
+  }
+
+  private clearManifest(): void {
+    if (typeof window === 'undefined') return;
+    try {
+      localStorage.removeItem(MANIFEST_STORAGE_KEY);
+    } catch {}
+  }
+
+  private syncManifestWithRecords(records: CachedTrackRecord[]): void {
+    if (records.length === 0) return;
+    const manifest = this.readManifest();
+    let changed = false;
+    for (const rec of records) {
+      if (!rec.audioBlob || rec.audioBlob.size <= 1000) continue;
+      if (rec.song?.source === 'local' || rec.id.startsWith('local-')) continue;
+      if (!manifest[rec.id]) {
+        manifest[rec.id] = {
+          id: rec.id,
+          cachedAt: rec.cachedAt || Date.now(),
+          song: sanitizeSongMetadata(rec.song),
+        };
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.writeManifest(manifest);
+    }
+  }
+
+  private readConfigMirror(): CacheConfig | null {
+    if (typeof window === 'undefined') return null;
+    try {
+      const raw = localStorage.getItem(CONFIG_STORAGE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as Partial<CacheConfig>;
+      if (parsed && typeof parsed === 'object' && parsed.retention) {
+        return {
+          retention: parsed.retention,
+          maxTracks: typeof parsed.maxTracks === 'number' ? parsed.maxTracks : DEFAULT_CACHE_CONFIG.maxTracks,
+          autoCacheOnPlay:
+            typeof parsed.autoCacheOnPlay === 'boolean'
+              ? parsed.autoCacheOnPlay
+              : DEFAULT_CACHE_CONFIG.autoCacheOnPlay,
+        };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  private writeConfigMirror(config: CacheConfig): void {
+    if (typeof window === 'undefined') return;
+    try {
+      localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config));
+    } catch {}
+  }
+
+  // ---- Subscriptions ----
+
   subscribe(listener: () => void) {
     this.listeners.push(listener);
     return () => {
@@ -106,7 +272,6 @@ class OfflineCacheService {
     };
   }
 
-  // Subscribe to active in-flight caching state (spinner updates)
   subscribeCaching(listener: (ids: Set<string>) => void) {
     this.cachingListeners.push(listener);
     return () => {
@@ -114,9 +279,20 @@ class OfflineCacheService {
     };
   }
 
+  subscribeRestore(listener: (event: CacheRestoreEvent) => void) {
+    this.restoreListeners.push(listener);
+    return () => {
+      this.restoreListeners = this.restoreListeners.filter((l) => l !== listener);
+    };
+  }
+
   private notifyCaching() {
     const snapshot = new Set(this.cachingIds);
     this.cachingListeners.forEach((l) => l(snapshot));
+  }
+
+  private notifyRestore(event: CacheRestoreEvent) {
+    this.restoreListeners.forEach((l) => l(event));
   }
 
   getCachingIdsSnapshot(): Set<string> {
@@ -130,9 +306,9 @@ class OfflineCacheService {
   async refreshCachedIds(): Promise<Set<string>> {
     try {
       const songs = await this.getAllCachedSongs();
-      // Only songs that actually contain a valid audio blob (>1000 bytes) are considered cached
       const valid = songs.filter((s) => s.audioBlob && s.audioBlob.size > 1000);
       this.cachedIds = new Set(valid.map((s) => s.id));
+      this.syncManifestWithRecords(valid);
       return this.cachedIds;
     } catch {
       return this.cachedIds;
@@ -224,13 +400,19 @@ class OfflineCacheService {
   }
 
   // Save song + audio stream to offline IndexedDB (deduplicated per song ID)
-  async cacheSong(song: Song, audioBlob?: Blob): Promise<boolean> {
+  async cacheSong(song: Song, audioBlob?: Blob, isBackgroundRestore = false): Promise<boolean> {
+    if (!isBackgroundRestore) {
+      this.intentionallyRemovedIds.delete(song.id);
+    } else if (this.intentionallyRemovedIds.has(song.id)) {
+      return false;
+    }
+
     const existingFlight = this.inFlightCaches.get(song.id);
     if (existingFlight && !audioBlob) {
       return existingFlight;
     }
 
-    const run = this._cacheSongInternal(song, audioBlob).finally(() => {
+    const run = this._cacheSongInternal(song, audioBlob, isBackgroundRestore).finally(() => {
       this.inFlightCaches.delete(song.id);
       this.cachingIds.delete(song.id);
       this.notifyCaching();
@@ -242,11 +424,14 @@ class OfflineCacheService {
     return run;
   }
 
-  private async _cacheSongInternal(song: Song, audioBlob?: Blob): Promise<boolean> {
+  private async _cacheSongInternal(
+    song: Song,
+    audioBlob?: Blob,
+    isBackgroundRestore = false
+  ): Promise<boolean> {
     try {
       const db = await this.initDB();
 
-      // Retrieve existing record if present to guard against overwriting valid cached audio
       const existingRecord = await new Promise<CachedTrackRecord | undefined>((resolve) => {
         const tx = db.transaction(STORE_SONGS, 'readonly');
         const store = tx.objectStore(STORE_SONGS);
@@ -255,19 +440,14 @@ class OfflineCacheService {
         req.onerror = () => resolve(undefined);
       });
 
-      // 1. Determine audio blob:
       let finalBlob: Blob | undefined = audioBlob && audioBlob.size > 1000 ? audioBlob : undefined;
 
-      // CRITICAL: If no new valid blob was provided, KEEP the existing audio blob!
       if (!finalBlob && existingRecord?.audioBlob && existingRecord.audioBlob.size > 1000) {
         finalBlob = existingRecord.audioBlob;
       }
 
-      // If still no blob, attempt to download real audio only when device is online
       if (!finalBlob) {
         if (typeof navigator !== 'undefined' && !navigator.onLine) {
-          // Offline mode: cannot download network audio.
-          // If song already has audio, it was preserved above. If not, abort to prevent corrupting records.
           return false;
         }
 
@@ -285,18 +465,19 @@ class OfflineCacheService {
         }
       }
 
-      // CRITICAL CHECK:
-      // If we STILL do not have a valid audio blob (>1000 bytes):
       if (!finalBlob || finalBlob.size <= 1000) {
         if (existingRecord?.audioBlob && existingRecord.audioBlob.size > 1000) {
           finalBlob = existingRecord.audioBlob;
         } else {
-          // NEVER save hollow/corrupted 0.2MB record with 0 audio bytes!
           return false;
         }
       }
 
-      // Also cache album artwork locally so offline mode never shows blank covers
+      // Abort save if user explicitly deleted this track while download was in flight
+      if (isBackgroundRestore && this.intentionallyRemovedIds.has(song.id)) {
+        return false;
+      }
+
       let artworkBlob: Blob | undefined =
         existingRecord?.artworkBlob && existingRecord.artworkBlob.size > 200
           ? existingRecord.artworkBlob
@@ -305,20 +486,28 @@ class OfflineCacheService {
         artworkBlob = await this.fetchCoverBlob(song);
       }
 
-      // Calculate real stored data size
+      if (isBackgroundRestore && this.intentionallyRemovedIds.has(song.id)) {
+        return false;
+      }
+
       const audioSize = finalBlob.size;
       const artworkSize = artworkBlob && artworkBlob.size > 200 ? artworkBlob.size : 0;
       const sizeBytes = audioSize + artworkSize;
 
+      const manifest = this.readManifest();
+      const preservedThumb = existingRecord?.song?.thumbnailUrl || manifest[song.id]?.song?.thumbnailUrl;
+      const sanitizedSong = sanitizeSongMetadata(song, preservedThumb);
+      const cachedAt = existingRecord?.cachedAt || manifest[song.id]?.cachedAt || Date.now();
+
       const record: CachedTrackRecord = {
         id: song.id,
         song: {
-          ...song,
+          ...sanitizedSong,
           streamUrl: song.streamUrl || existingRecord?.song?.streamUrl,
         },
         audioBlob: finalBlob,
         artworkBlob,
-        cachedAt: existingRecord?.cachedAt || Date.now(),
+        cachedAt,
         lastAccessedAt: Date.now(),
         sizeBytes,
       };
@@ -333,9 +522,17 @@ class OfflineCacheService {
         req.onerror = () => reject(req.error);
       });
 
+      this.upsertManifestEntry(sanitizedSong, cachedAt);
       this.ensureCoverUrl(song.id, artworkBlob);
       this.cachedIds.add(song.id);
       this.notify();
+
+      // Re-assert persistent storage upon real offline write (boosts iOS 17+ & Android Chromium grant)
+      if (!this.persistenceRequestedThisSession) {
+        this.persistenceRequestedThisSession = true;
+        this.requestPersistence().catch(() => {});
+      }
+
       return true;
     } catch {
       return false;
@@ -343,7 +540,9 @@ class OfflineCacheService {
   }
 
   // Retrieve cached track record and create valid blob URLs for offline audio & cover playback
-  async getCachedTrackAudioUrl(songId: string): Promise<{ song: Song; audioUrl: string; coverUrl?: string } | null> {
+  async getCachedTrackAudioUrl(
+    songId: string
+  ): Promise<{ song: Song; audioUrl: string; coverUrl?: string } | null> {
     try {
       const db = await this.initDB();
       return new Promise((resolve) => {
@@ -355,9 +554,7 @@ class OfflineCacheService {
           const record = req.result as CachedTrackRecord | undefined;
           if (!record) return resolve(null);
 
-          // If record does not contain a valid audioBlob (>1000 bytes)
           if (!record.audioBlob || record.audioBlob.size <= 1000) {
-            // Hollow corrupted record detected - queue auto-repair if online
             if (typeof navigator !== 'undefined' && navigator.onLine) {
               this.cacheSong(record.song).catch(() => {});
             }
@@ -388,6 +585,94 @@ class OfflineCacheService {
     } catch {
       return null;
     }
+  }
+
+  // Automatically recovers cached tracks if IndexedDB was swept by Android/iOS OS or browser cleaner
+  async restoreMissingTracksFromManifest(): Promise<number> {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return 0;
+    if (this.restoreInFlight) return this.restoreInFlight;
+
+    this.restoreInFlight = (async () => {
+      try {
+        this.lastRestoreAttemptAt = Date.now();
+        const manifest = this.readManifest();
+        const entries = Object.values(manifest);
+        if (entries.length === 0) return 0;
+
+        // Prune manifest entries that would already be expired under current retention policy
+        const config = await this.getCacheConfig();
+        let maxAgeMs = Infinity;
+        if (config.retention === '7d') maxAgeMs = 7 * 24 * 60 * 60 * 1000;
+        else if (config.retention === '14d') maxAgeMs = 14 * 24 * 60 * 60 * 1000;
+        else if (config.retention === '30d') maxAgeMs = 30 * 24 * 60 * 60 * 1000;
+
+        const now = Date.now();
+        let manifestChanged = false;
+        if (Number.isFinite(maxAgeMs)) {
+          for (const entry of entries) {
+            if (now - entry.cachedAt > maxAgeMs) {
+              delete manifest[entry.id];
+              manifestChanged = true;
+            }
+          }
+          if (manifestChanged) {
+            this.writeManifest(manifest);
+          }
+        }
+
+        const existingSongs = await this.getAllCachedSongs();
+        const validIdSet = new Set(
+          existingSongs.filter((s) => s.audioBlob && s.audioBlob.size > 1000).map((s) => s.id)
+        );
+
+        const missing = Object.values(manifest)
+          .filter(
+            (entry) =>
+              entry?.id &&
+              entry.song &&
+              entry.song.source !== 'local' &&
+              !entry.id.startsWith('local-') &&
+              !validIdSet.has(entry.id) &&
+              !this.intentionallyRemovedIds.has(entry.id) &&
+              !this.restoreAttemptedSessionIds.has(entry.id)
+          )
+          .sort((a, b) => b.cachedAt - a.cachedAt);
+
+        if (missing.length === 0) return 0;
+
+        for (const entry of missing) {
+          this.restoreAttemptedSessionIds.add(entry.id);
+        }
+
+        this.notifyRestore({ phase: 'start', total: missing.length, completed: 0 });
+
+        let cursor = 0;
+        let completed = 0;
+        const worker = async () => {
+          while (cursor < missing.length) {
+            if (typeof navigator !== 'undefined' && !navigator.onLine) break;
+            const entry = missing[cursor++];
+            if (!entry || this.intentionallyRemovedIds.has(entry.id)) continue;
+            const ok = await this.cacheSong(entry.song, undefined, true).catch(() => false);
+            if (ok) {
+              completed++;
+              this.notifyRestore({ phase: 'progress', total: missing.length, completed });
+            }
+          }
+        };
+
+        await Promise.all([worker(), worker()]);
+
+        this.notifyRestore({ phase: 'done', total: missing.length, completed });
+        return completed;
+      } catch {
+        return 0;
+      } finally {
+        this.restoreInFlight = null;
+      }
+    })();
+
+    return this.restoreInFlight;
   }
 
   // Detects any legacy hollow 0.2MB tracks and re-caches real audio in background when online
@@ -476,6 +761,9 @@ class OfflineCacheService {
   }
 
   async removeCachedSong(songId: string): Promise<boolean> {
+    this.intentionallyRemovedIds.add(songId);
+    this.removeManifestEntry(songId);
+
     try {
       const db = await this.initDB();
       await new Promise<void>((resolve, reject) => {
@@ -495,7 +783,19 @@ class OfflineCacheService {
   }
 
   async clearAllCache(): Promise<boolean> {
+    for (const id of this.cachedIds) {
+      this.intentionallyRemovedIds.add(id);
+    }
+    for (const id of Object.keys(this.readManifest())) {
+      this.intentionallyRemovedIds.add(id);
+    }
+    this.clearManifest();
+
     try {
+      if (typeof caches !== 'undefined') {
+        caches.delete(LEGACY_MEDIA_CACHE_KEY).catch(() => false);
+      }
+
       const db = await this.initDB();
       await new Promise<void>((resolve, reject) => {
         const tx = db.transaction(STORE_SONGS, 'readwrite');
@@ -519,7 +819,6 @@ class OfflineCacheService {
     const list = await this.getAllCachedSongs();
     let totalBytes = list.reduce((sum, item) => sum + (item.sizeBytes || 0), 0);
 
-    // If browser supports navigator.storage.estimate, use actual quota usage when higher
     if (typeof navigator !== 'undefined' && navigator.storage && navigator.storage.estimate) {
       try {
         const est = await navigator.storage.estimate();
@@ -537,23 +836,39 @@ class OfflineCacheService {
     };
   }
 
-  // Cache configuration & retention policy
+  // Cache configuration & retention policy (with localStorage mirror recovery)
   async getCacheConfig(): Promise<CacheConfig> {
     try {
       const db = await this.initDB();
-      return new Promise((resolve) => {
+      const fromDb = await new Promise<CacheConfig | null>((resolve) => {
         const tx = db.transaction(STORE_CONFIG, 'readonly');
         const store = tx.objectStore(STORE_CONFIG);
         const req = store.get('settings');
-        req.onsuccess = () => resolve(req.result?.value || DEFAULT_CACHE_CONFIG);
-        req.onerror = () => resolve(DEFAULT_CACHE_CONFIG);
+        req.onsuccess = () => resolve((req.result?.value as CacheConfig | undefined) || null);
+        req.onerror = () => resolve(null);
       });
-    } catch {
+
+      if (fromDb) {
+        this.writeConfigMirror(fromDb);
+        return fromDb;
+      }
+
+      const mirrored = this.readConfigMirror();
+      if (mirrored) {
+        // Rehydrate wiped IDB config from localStorage mirror
+        const tx = db.transaction(STORE_CONFIG, 'readwrite');
+        tx.objectStore(STORE_CONFIG).put({ key: 'settings', value: mirrored });
+        return mirrored;
+      }
+
       return DEFAULT_CACHE_CONFIG;
+    } catch {
+      return this.readConfigMirror() || DEFAULT_CACHE_CONFIG;
     }
   }
 
   async saveCacheConfig(config: CacheConfig): Promise<void> {
+    this.writeConfigMirror(config);
     try {
       const db = await this.initDB();
       await new Promise<void>((resolve) => {
@@ -586,7 +901,7 @@ class OfflineCacheService {
     }
   }
 
-  // Persistent Storage API: guards against automatic eviction by Android / Chrome
+  // Persistent Storage API: guards against automatic eviction by Android / iOS / Desktop browsers
   async isStoragePersisted(): Promise<boolean> {
     if (typeof navigator !== 'undefined' && navigator.storage && navigator.storage.persisted) {
       try {

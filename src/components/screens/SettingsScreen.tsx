@@ -49,6 +49,7 @@ export const SettingsScreen: React.FC = () => {
     setEnableMultipleQueues,
     autoResumeOnCall,
     setAutoResumeOnCall,
+    showToast,
   } = useMusic();
   const { isInstalled } = usePWAInstall();
 
@@ -66,9 +67,9 @@ export const SettingsScreen: React.FC = () => {
     const granted = await offlineCacheService.requestPersistence();
     setIsPersisted(granted);
     if (granted) {
-      alert('Permanent Storage Activated!\nAndroid OS and Chrome will never automatically evict or clear your offline cached music.');
+      showToast('Permanent Eviction Guard active — songs & app shell protected');
     } else {
-      alert('Persistent storage requested. Installing Muzika as a PWA on your Android home screen guarantees permanent storage protection.');
+      showToast('Install Muzika to your Home Screen for permanent storage protection');
     }
   };
 
@@ -456,8 +457,8 @@ export const SettingsScreen: React.FC = () => {
             </div>
             <p className="text-[11px] opacity-75 leading-relaxed">
               {isPersisted
-                ? 'Your offline songs are protected by the Android Persistent Storage API. Android OS and Chrome will NEVER automatically evict or clear your cached music, even if phone storage runs low.'
-                : 'Android currently manages cache under Chrome site data. Tap below to activate permanent eviction protection so songs are never deleted automatically.'}
+                ? 'Your offline songs and app shell are guarded by Persistent Storage plus automatic manifest recovery across Android, iOS, and Desktop browsers.'
+                : 'Your browser currently manages offline songs under standard site storage. Tap below to activate permanent eviction protection so songs are never automatically cleared.'}
             </p>
             {!isPersisted && (
               <button

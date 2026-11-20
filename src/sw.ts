@@ -1,98 +1,93 @@
 /// <reference lib="webworker" />
-import { precacheAndRoute, cleanupOutdatedCaches } from 'workbox-precaching';
+import { cleanupOutdatedCaches, matchPrecache, precacheAndRoute } from 'workbox-precaching';
+import { NavigationRoute, registerRoute } from 'workbox-routing';
 
 declare const self: ServiceWorkerGlobalScope;
 
+const LEGACY_MEDIA_CACHE_KEY = 'muzika-media-v1';
+const APP_SHELL_CACHE = 'muzika-app-shell-v1';
+
 cleanupOutdatedCaches();
-precacheAndRoute(self.__WB_MANIFEST || []);
+precacheAndRoute(self.__WB_MANIFEST || [], {
+  ignoreURLParametersMatching: [/.*/],
+});
 
-const MEDIA_CACHE_KEY = 'muzika-media-v1';
+async function getOfflineAppShell(): Promise<Response | undefined> {
+  const precached =
+    (await matchPrecache('/index.html')) ||
+    (await matchPrecache('index.html')) ||
+    (await caches.match('/index.html', { ignoreSearch: true })) ||
+    (await caches.match('/', { ignoreSearch: true }));
+  if (precached) return precached;
 
-self.addEventListener('install', () => {
-  self.skipWaiting();
+  try {
+    const shellCache = await caches.open(APP_SHELL_CACHE);
+    const fallback = await shellCache.match('/index.html');
+    return fallback || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const navigationHandler = async ({ request }: { request: Request }): Promise<Response> => {
+  // Prefer precached app shell first so WebAPK / iOS standalone launches never fail offline or on flaky cellular.
+  // App updates still roll out automatically via SW lifecycle + pwaUpdater.
+  const cachedShell = await getOfflineAppShell();
+  if (cachedShell) {
+    return cachedShell;
+  }
+
+  try {
+    const networkResponse = await fetch(request);
+    if (networkResponse.ok && !networkResponse.redirected) {
+      const shellCache = await caches.open(APP_SHELL_CACHE);
+      shellCache.put('/index.html', networkResponse.clone()).catch(() => {});
+    }
+    return networkResponse;
+  } catch {
+    return new Response('Muzika is currently offline. Reconnect once to finish caching the app shell.', {
+      status: 503,
+      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+    });
+  }
+};
+
+registerRoute(
+  new NavigationRoute(navigationHandler, {
+    denylist: [/^\/api\//, /^\/landing\.html/, /^\/landing-dist\//],
+  })
+);
+
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    (async () => {
+      try {
+        const res = await fetch('/index.html', { cache: 'reload' });
+        if (res.ok && !res.redirected) {
+          const shellCache = await caches.open(APP_SHELL_CACHE);
+          await shellCache.put('/index.html', res);
+        }
+      } catch {
+        // Ignore network errors during background install; precache handles shell caching
+      }
+      await self.skipWaiting();
+    })()
+  );
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    (async () => {
+      // Remove legacy unbounded media CacheStorage so audio streams are never double-cached
+      // alongside IndexedDB (prevents quota bloat & OS/browser cache sweeps).
+      await caches.delete(LEGACY_MEDIA_CACHE_KEY).catch(() => false);
+      await self.clients.claim();
+    })()
+  );
 });
 
-self.addEventListener('fetch', (event: FetchEvent) => {
-  const url = new URL(event.request.url);
-
-  // Intercept audio stream playback requests for background and offline Range support,
-  // but bypass SW for metadata lookups (?json=true) and explicit IndexedDB blob downloads (?download=1).
-  if (
-    url.pathname.startsWith('/api/stream') &&
-    url.searchParams.get('json') !== 'true' &&
-    url.searchParams.get('download') !== '1'
-  ) {
-    event.respondWith(handleAudioStreamFetch(event));
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
   }
 });
-
-async function handleAudioStreamFetch(event: FetchEvent): Promise<Response> {
-  const request = event.request;
-  const rangeHeader = request.headers.get('Range');
-
-  // 1. Try Network First Strategy
-  try {
-    const networkResponse = await fetch(request);
-    if (networkResponse.ok || networkResponse.status === 206) {
-      // Cache full stream response when fetched from start
-      if (!rangeHeader || rangeHeader === 'bytes=0-') {
-        const cache = await caches.open(MEDIA_CACHE_KEY);
-        cache.put(request.url, networkResponse.clone()).catch(() => {});
-      }
-      return networkResponse;
-    }
-  } catch (err) {
-    // Network offline or failed, proceed to cache fallback
-  }
-
-  // 2. Cache Fallback Strategy
-  const cache = await caches.open(MEDIA_CACHE_KEY);
-  const cachedResponse = await cache.match(request.url);
-
-  if (!cachedResponse) {
-    return new Response('Audio stream payload not available offline', { status: 404 });
-  }
-
-  const blob = await cachedResponse.blob();
-  const totalByteLength = blob.size;
-
-  // 3. Handle Standard Non-Ranged Request
-  if (!rangeHeader) {
-    return new Response(blob, {
-      status: 200,
-      headers: {
-        'Content-Type': cachedResponse.headers.get('Content-Type') || 'audio/mp4',
-        'Content-Length': totalByteLength.toString(),
-        'Accept-Ranges': 'bytes',
-        'Cache-Control': 'public, max-age=31536000',
-      },
-    });
-  }
-
-  // 4. Synthesize HTTP 206 Partial Content Response for Byte-Ranged Request
-  const byteRangeParts = rangeHeader.replace(/bytes=/, '').split('-');
-  const startByte = parseInt(byteRangeParts[0], 10) || 0;
-  const endByte = byteRangeParts[1] ? parseInt(byteRangeParts[1], 10) : totalByteLength - 1;
-
-  const validStart = Math.min(startByte, totalByteLength - 1);
-  const validEnd = Math.min(endByte, totalByteLength - 1);
-  const chunkLength = validEnd - validStart + 1;
-
-  const slicedBlob = blob.slice(validStart, validEnd + 1);
-
-  return new Response(slicedBlob, {
-    status: 206,
-    statusText: 'Partial Content',
-    headers: {
-      'Content-Type': cachedResponse.headers.get('Content-Type') || 'audio/mp4',
-      'Content-Range': `bytes ${validStart}-${validEnd}/${totalByteLength}`,
-      'Content-Length': chunkLength.toString(),
-      'Accept-Ranges': 'bytes',
-      'Cache-Control': 'public, max-age=31536000',
-    },
-  });
-}

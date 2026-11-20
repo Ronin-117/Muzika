@@ -7,7 +7,7 @@
 **A fast, mobile-first Progressive Web App (PWA) music player inspired by the [RiPlay](https://github.com/fast4x/RiPlay) architecture.**  
 Ad-free YouTube Music streaming, IndexedDB offline caching, synchronized lyrics, a real-time 5-band Web Audio DSP equalizer, multi-queue workspaces, and direct `.db` / `.backup` migration — running natively on Android, iOS, and Desktop browsers.
 
-[![Version](https://img.shields.io/badge/Version-v2.8.7-DE6433?style=for-the-badge)](src/version.ts)
+[![Version](https://img.shields.io/badge/Version-v2.8.8-DE6433?style=for-the-badge)](src/version.ts)
 [![React](https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Strict-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![PWA](https://img.shields.io/badge/PWA-Installable-1DB954?style=for-the-badge&logo=googlechrome&logoColor=white)](vite.config.ts)
