@@ -22,7 +22,11 @@ import {
   CacheConfig,
   DEFAULT_CACHE_CONFIG,
 } from '../services/offlineCacheService';
-import { RiplaySqliteImporter, RiplayImportSummary } from '../services/riplaySqliteImporter';
+import {
+  RiplaySqliteImporter,
+  RiplayImportSummary,
+  RiplayExportResult,
+} from '../services/riplaySqliteImporter';
 import { OnlineMusicService } from '../services/onlineMusicService';
 import { getSubAudibleAudioUri, audioFocusManager } from '../utils/audioWakeLock';
 import { extractDynamicPalette } from '../utils/colorExtractor';
@@ -65,6 +69,9 @@ interface MusicContextType {
   setIsPWAInstallModalOpen: (open: boolean) => void;
   isRiplayImportOpen: boolean;
   setIsRiplayImportOpen: (open: boolean) => void;
+  riplayModalMode: 'import' | 'export';
+  setRiplayModalMode: (mode: 'import' | 'export') => void;
+  openRiplayModal: (mode?: 'import' | 'export') => void;
   isExitConfirmOpen: boolean;
   setIsExitConfirmOpen: (open: boolean) => void;
   confirmExitApp: () => void;
@@ -179,8 +186,9 @@ interface MusicContextType {
   updateCacheConfig: (config: CacheConfig) => Promise<void>;
   storageEstimate: { totalBytes: number; count: number };
 
-  // RiPlay SQLite Database Import (.db / .backup)
-  importRiplaySqliteBackup: (file: File) => Promise<RiplayImportSummary>;
+  // RiPlay SQLite Database 2-Way Sync (.db / .backup)
+  importRiplaySqliteBackup: (file: File, onLog?: (msg: string) => void) => Promise<RiplayImportSummary>;
+  exportRiplaySqliteBackup: (onLog?: (msg: string) => void) => Promise<RiplayExportResult>;
   importedArtists: Artist[];
   importedAlbums: Album[];
   lastImportSummary: RiplayImportSummary | null;
@@ -283,6 +291,9 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [isSongInfoOpen, setIsSongInfoOpenState] = useState(false);
   const [isPWAInstallModalOpen, setIsPWAInstallModalOpenState] = useState(false);
   const [isRiplayImportOpen, setIsRiplayImportOpenState] = useState(false);
+  const [riplayModalMode, setRiplayModalMode] = useState<'import' | 'export'>('import');
+  const isRiplayImportingRef = useRef<boolean>(false);
+  const isRiplayExportingRef = useRef<boolean>(false);
   const [isExitConfirmOpen, setIsExitConfirmOpenState] = useState(false);
   const [playerMode, setPlayerMode] = useState<'audio' | 'video' | 'lyrics'>('audio');
 
@@ -351,6 +362,10 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     navStateRef.current.isRiplayImportOpen = open;
     setIsRiplayImportOpenState(open);
   }, [pushHistoryLayer]);
+  const openRiplayModal = useCallback((mode: 'import' | 'export' = 'import') => {
+    setRiplayModalMode(mode);
+    setIsRiplayImportOpen(true);
+  }, [setIsRiplayImportOpen]);
   const setSelectedPlaylist = useCallback((playlist: Playlist | null) => {
     if (playlist && !navStateRef.current.selectedPlaylist) pushHistoryLayer();
     navStateRef.current.selectedPlaylist = playlist;
@@ -491,6 +506,26 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   // Saved / Followed Library States
   const [savedArtists, setSavedArtists] = useState<Artist[]>(() => StorageService.getSavedArtists());
   const [savedAlbums, setSavedAlbums] = useState<Album[]>(() => StorageService.getSavedAlbums());
+
+  // Synchronized refs for O(N) non-blocking RiPlay import/export merges
+  const likedSongsRef = useRef<Song[]>(likedSongs);
+  likedSongsRef.current = likedSongs;
+  const playlistsRef = useRef<Playlist[]>(playlists);
+  playlistsRef.current = playlists;
+  const historyRef = useRef<Song[]>(history);
+  historyRef.current = history;
+  const blacklistRef = useRef(blacklist);
+  blacklistRef.current = blacklist;
+  const userStatsRef = useRef<UserStats>(userStats);
+  userStatsRef.current = userStats;
+  const importedArtistsRef = useRef<Artist[]>(importedArtists);
+  importedArtistsRef.current = importedArtists;
+  const importedAlbumsRef = useRef<Album[]>(importedAlbums);
+  importedAlbumsRef.current = importedAlbums;
+  const savedArtistsRef = useRef<Artist[]>(savedArtists);
+  savedArtistsRef.current = savedArtists;
+  const savedAlbumsRef = useRef<Album[]>(savedAlbums);
+  savedAlbumsRef.current = savedAlbums;
 
   // Call / External Audio Interruption Auto-Pause & Auto-Resume (Default ON)
   const [autoResumeOnCall, setAutoResumeOnCallState] = useState<boolean>(() => StorageService.getAutoResumeOnCall());
@@ -2662,139 +2697,382 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     });
   };
 
-  const importRiplaySqliteBackup = async (file: File): Promise<RiplayImportSummary> => {
-    hapticFeedback();
-    const buffer = await file.arrayBuffer();
-    
-    // Yield to let UI update state before heavy parsing
-    await new Promise((r) => setTimeout(r, 10));
-    const summary = await RiplaySqliteImporter.importFromDatabaseBuffer(buffer);
-    await new Promise((r) => setTimeout(r, 10));
-
-    // 1. Merge playlists (avoid duplicates by id or normalized title)
-    setPlaylists((prev) => {
-      const existingIds = new Set(prev.map((p) => p.id));
-      const existingTitles = new Set(prev.map((p) => (p.title || '').toLowerCase().trim()));
-      const newPlaylists = summary.importedPlaylists.filter(
-        (p) => !existingIds.has(p.id) && !existingTitles.has((p.title || '').toLowerCase().trim())
-      );
-      const combined = [...newPlaylists, ...prev];
-      StorageService.savePlaylists(combined);
-      return combined;
-    });
-
-    // 2. Merge liked songs (avoid duplicates by id or title+artist)
-    setLikedSongs((prev) => {
-      const existingIds = new Set(prev.map((s) => s.id));
-      const existingKeys = new Set(prev.map((s) => `${(s.title || '').toLowerCase()}_${(s.artist || '').toLowerCase()}`));
-      const newLiked = summary.importedLikedSongs.filter(
-        (s) => !existingIds.has(s.id) && !existingKeys.has(`${(s.title || '').toLowerCase()}_${(s.artist || '').toLowerCase()}`)
-      );
-      const combined = [...newLiked, ...prev];
-      StorageService.saveLikedSongs(combined);
-      return combined;
-    });
-
-    // 3. Merge history
-    if (summary.importedHistory.length > 0) {
-      setHistory((prev) => {
-        const existingIds = new Set(prev.map((s) => s.id));
-        const newHist = summary.importedHistory.filter((s) => !existingIds.has(s.id));
-        const combined = [...newHist, ...prev].slice(0, 50);
-        StorageService.saveHistory(combined);
-        return combined;
-      });
+  const importRiplaySqliteBackup = async (
+    file: File,
+    onLog?: (msg: string) => void
+  ): Promise<RiplayImportSummary> => {
+    if (isRiplayImportingRef.current) {
+      throw new Error('An import is already in progress. Please wait for it to complete.');
     }
+    isRiplayImportingRef.current = true;
+    const tStart = performance.now();
+    const collectedLogs: string[] = [];
+    const emit = (msg: string) => {
+      const elapsed = ((performance.now() - tStart) / 1000).toFixed(2);
+      const line = `[+${elapsed}s] ${msg}`;
+      collectedLogs.push(line);
+      onLog?.(line);
+    };
+    const yieldMain = () => new Promise<void>((r) => setTimeout(r, 0));
 
-    // 4. Merge blacklist
-    if (summary.importedBlacklist.length > 0) {
-      setBlacklist((prev) => {
-        const existingIds = new Set(prev.map((b) => b.id));
-        const newBl = summary.importedBlacklist.filter((b) => !existingIds.has(b.id));
-        const combined = [...prev, ...newBl];
-        StorageService.saveBlacklist(combined);
-        return combined;
-      });
-    }
+    const persistWithLog = (label: string, fn: () => void, payload?: unknown) => {
+      try {
+        fn();
+        if (payload !== undefined) {
+          // Estimate size cleanly only when needed for diagnostics
+          const countHint = Array.isArray(payload) ? `${payload.length} items` : 'object';
+          emit(`Saved ${label} (${countHint})`);
+        } else {
+          emit(`Saved ${label}`);
+        }
+      } catch (e: any) {
+        emit(`Warning saving ${label}: ${String(e?.message || e)}`);
+      }
+    };
 
-    // 5. Save imported artists & albums with deduplication
-    if (summary.importedArtists.length > 0) {
-      setImportedArtists((prev) => {
-        const existingIds = new Set(prev.map((a) => a.id));
-        const existingNames = new Set(prev.map((a) => (a.name || '').toLowerCase().trim()));
-        const newArtists = summary.importedArtists.filter(
-          (a) => !existingIds.has(a.id) && !existingNames.has((a.name || '').toLowerCase().trim())
-        );
-        const combined = [...prev, ...newArtists];
-        StorageService.saveCustomArtists(combined);
-        return combined;
-      });
-      setSavedArtists((prev) => {
-        const existingIds = new Set(prev.map((a) => a.id));
-        const existingNames = new Set(prev.map((a) => (a.name || '').toLowerCase().trim()));
-        const newArtists = summary.importedArtists.filter(
-          (a) => !existingIds.has(a.id) && !existingNames.has((a.name || '').toLowerCase().trim())
-        );
-        const combined = [...prev, ...newArtists];
-        StorageService.saveSavedArtists(combined);
-        return combined;
-      });
-    }
+    try {
+      hapticFeedback();
+      emit(`Selected file: "${file.name}" (${(file.size / 1024).toFixed(1)} KB)`);
+      const buffer = await file.arrayBuffer();
+      emit(`Read file ArrayBuffer into memory (${(buffer.byteLength / 1024).toFixed(1)} KB)`);
 
-    if (summary.importedAlbums.length > 0) {
-      setImportedAlbums((prev) => {
-        const existingIds = new Set(prev.map((a) => a.id));
-        const existingTitles = new Set(prev.map((a) => (a.title || '').toLowerCase().trim()));
-        const newAlbums = summary.importedAlbums.filter(
-          (a) => !existingIds.has(a.id) && !existingTitles.has((a.title || '').toLowerCase().trim())
-        );
-        const combined = [...prev, ...newAlbums];
-        StorageService.saveCustomAlbums(combined);
-        return combined;
+      await yieldMain();
+      const summary = await RiplaySqliteImporter.importFromDatabaseBuffer(buffer, (importerLine) => {
+        // Importer already formats timestamped lines or step text; forward directly without double-prefix
+        collectedLogs.push(importerLine);
+        onLog?.(importerLine);
       });
-      setSavedAlbums((prev) => {
-        const existingIds = new Set(prev.map((a) => a.id));
-        const existingTitles = new Set(prev.map((a) => (a.title || '').toLowerCase().trim()));
-        const newAlbums = summary.importedAlbums.filter(
-          (a) => !existingIds.has(a.id) && !existingTitles.has((a.title || '').toLowerCase().trim())
-        );
-        const combined = [...prev, ...newAlbums];
-        StorageService.saveSavedAlbums(combined);
-        return combined;
-      });
-    }
+      await yieldMain();
 
-    // 6. Update user stats safely
-    setUserStats((prev) => {
-      const addedPlays = summary.importedSongs.reduce((acc, s) => acc + (s.playCount || 0), 0);
-      const addedMinutes = Math.round(
-        summary.importedSongs.reduce((acc, s) => acc + ((s.playCount || 0) * (s.duration || 180)) / 60, 0)
-      );
-      const updated: UserStats = {
-        ...prev,
-        totalPlays: prev.totalPlays + addedPlays,
-        totalMinutes: prev.totalMinutes + addedMinutes,
+      // Build O(1) lookup maps of freshly imported songs to enrich existing library items on re-import
+      emit('Starting non-blocking library merge...');
+      const songById = new Map<string, Song>();
+      summary.importedSongs.forEach((s) => songById.set(s.id, s));
+
+      const enrichSong = (existing: Song): Song => {
+        const fresh = songById.get(existing.id);
+        if (!fresh) return existing;
+        const mergedPlayCount = Math.max(existing.playCount || 0, fresh.playCount || 0);
+        const mergedPlayTime = Math.max(existing.totalPlayTimeMs || 0, fresh.totalPlayTimeMs || 0);
+        return {
+          ...existing,
+          artistId: existing.artistId || fresh.artistId,
+          albumId: existing.albumId || fresh.albumId,
+          album: existing.album || fresh.album,
+          likedAt: existing.likedAt || fresh.likedAt,
+          lyrics: existing.lyrics || fresh.lyrics,
+          playCount: mergedPlayCount,
+          totalPlayTimeMs: mergedPlayTime || undefined,
+          thumbnailUrl: existing.thumbnailUrl || fresh.thumbnailUrl,
+        };
       };
-      StorageService.saveUserStats(updated);
-      return updated;
-    });
 
-    // 7. If active queue is default or empty, switch to first imported playlist
-    if (summary.importedPlaylists.length > 0 && summary.importedPlaylists[0].songs.length > 0) {
-      const firstPl = summary.importedPlaylists[0];
-      setQueue(firstPl.songs);
-      setQueueIndex(0);
-      setCurrentSong(firstPl.songs[0]);
-    } else if (summary.importedLikedSongs.length > 0) {
-      setQueue(summary.importedLikedSongs);
-      setQueueIndex(0);
-      setCurrentSong(summary.importedLikedSongs[0]);
+      // 1. Merge Playlists cleanly in O(N) (avoid duplicates + append newly discovered tracks on re-import)
+      const prevPlaylists = playlistsRef.current;
+      const incomingPlById = new Map<string, Playlist>();
+      const incomingPlByTitle = new Map<string, Playlist>();
+      summary.importedPlaylists.forEach((pl) => {
+        incomingPlById.set(pl.id, pl);
+        const tKey = (pl.title || '').toLowerCase().trim();
+        if (tKey && !incomingPlByTitle.has(tKey)) incomingPlByTitle.set(tKey, pl);
+      });
+
+      const matchedIncomingIds = new Set<string>();
+      const updatedExistingPlaylists = prevPlaylists.map((pl) => {
+        const tKey = (pl.title || '').toLowerCase().trim();
+        const match = incomingPlById.get(pl.id) || (tKey ? incomingPlByTitle.get(tKey) : undefined);
+        if (!match) {
+          return { ...pl, songs: pl.songs.map(enrichSong) };
+        }
+        matchedIncomingIds.add(match.id);
+        const existingTrackIds = new Set(pl.songs.map((s) => s.id));
+        const newTracks = match.songs.filter((s) => !existingTrackIds.has(s.id));
+        const enrichedExisting = pl.songs.map(enrichSong);
+        return {
+          ...pl,
+          browseId: pl.browseId || match.browseId,
+          coverUrl: pl.coverUrl || match.coverUrl,
+          songs: newTracks.length > 0 ? [...enrichedExisting, ...newTracks] : enrichedExisting,
+        };
+      });
+
+      const brandNewPlaylists = summary.importedPlaylists.filter((p) => !matchedIncomingIds.has(p.id));
+      const combinedPlaylists = [...brandNewPlaylists, ...updatedExistingPlaylists];
+      setPlaylists(combinedPlaylists);
+      persistWithLog('playlists', () => StorageService.savePlaylists(combinedPlaylists), combinedPlaylists);
+      emit(
+        `Playlists merged: ${brandNewPlaylists.length} new, ${updatedExistingPlaylists.length} updated/kept`
+      );
+      await yieldMain();
+
+      // 2. Merge Liked Songs in O(N)
+      const prevLiked = likedSongsRef.current;
+      const existingLikedIds = new Set(prevLiked.map((s) => s.id));
+      const existingLikedKeys = new Set(
+        prevLiked.map((s) => `${(s.title || '').toLowerCase()}_${(s.artist || '').toLowerCase()}`)
+      );
+      const newLiked = summary.importedLikedSongs.filter(
+        (s) =>
+          !existingLikedIds.has(s.id) &&
+          !existingLikedKeys.has(`${(s.title || '').toLowerCase()}_${(s.artist || '').toLowerCase()}`)
+      );
+      const combinedLiked = [...newLiked, ...prevLiked.map(enrichSong)];
+      setLikedSongs(combinedLiked);
+      persistWithLog('likedSongs', () => StorageService.saveLikedSongs(combinedLiked), combinedLiked);
+      emit(`Liked songs merged: ${newLiked.length} new, ${combinedLiked.length} total`);
+      await yieldMain();
+
+      // 3. Merge History in O(N)
+      if (summary.importedHistory.length > 0) {
+        const prevHist = historyRef.current;
+        const existingHistIds = new Set(prevHist.map((s) => s.id));
+        const newHist = summary.importedHistory.filter((s) => !existingHistIds.has(s.id));
+        const combinedHist = [...newHist, ...prevHist.map(enrichSong)].slice(0, 50);
+        setHistory(combinedHist);
+        persistWithLog('history', () => StorageService.saveHistory(combinedHist), combinedHist);
+      }
+
+      // 4. Merge Blacklist in O(N)
+      if (summary.importedBlacklist.length > 0) {
+        const prevBl = blacklistRef.current;
+        const existingBlIds = new Set(prevBl.map((b) => b.id));
+        const newBl = summary.importedBlacklist.filter((b) => !existingBlIds.has(b.id));
+        if (newBl.length > 0) {
+          const combinedBl = [...prevBl, ...newBl];
+          setBlacklist(combinedBl);
+          persistWithLog('blacklist', () => StorageService.saveBlacklist(combinedBl), combinedBl);
+        }
+      }
+      await yieldMain();
+
+      // 5. Merge Imported Artists & ONLY Bookmarked Saved Artists (never duplicate all 1000+ browse artists twice)
+      if (summary.importedArtists.length > 0) {
+        const prevImpArtists = importedArtistsRef.current;
+        const incomingById = new Map<string, Artist>();
+        const incomingByName = new Map<string, Artist>();
+        summary.importedArtists.forEach((a) => {
+          incomingById.set(a.id, a);
+          const nKey = (a.name || '').toLowerCase().trim();
+          if (nKey && !incomingByName.has(nKey)) incomingByName.set(nKey, a);
+        });
+
+        const matchedArtIds = new Set<string>();
+        const updatedImpArtists = prevImpArtists.map((existing) => {
+          const nKey = (existing.name || '').toLowerCase().trim();
+          const fresh = incomingById.get(existing.id) || (nKey ? incomingByName.get(nKey) : undefined);
+          if (!fresh) return existing;
+          matchedArtIds.add(fresh.id);
+          return {
+            ...existing,
+            thumbnailUrl: existing.thumbnailUrl || fresh.thumbnailUrl,
+            bookmarkedAt: existing.bookmarkedAt || fresh.bookmarkedAt,
+            timestamp: fresh.timestamp || existing.timestamp,
+            topSongs: fresh.topSongs && fresh.topSongs.length > 0 ? fresh.topSongs : existing.topSongs,
+          };
+        });
+        const newImpArtists = summary.importedArtists.filter((a) => !matchedArtIds.has(a.id));
+        const combinedImpArtists = [...updatedImpArtists, ...newImpArtists];
+        setImportedArtists(combinedImpArtists);
+        persistWithLog(
+          'importedArtists',
+          () => StorageService.saveCustomArtists(combinedImpArtists),
+          combinedImpArtists
+        );
+
+        // Only add explicitly bookmarked artists to savedArtists (prevents 2x storage bloat & re-import lag)
+        const bookmarkedIncoming = summary.importedArtists.filter(
+          (a) => typeof a.bookmarkedAt === 'number' && a.bookmarkedAt > 0
+        );
+        if (bookmarkedIncoming.length > 0) {
+          const prevSavedArt = savedArtistsRef.current;
+          const savedIds = new Set(prevSavedArt.map((a) => a.id));
+          const savedNames = new Set(prevSavedArt.map((a) => (a.name || '').toLowerCase().trim()));
+          const newSavedArt = bookmarkedIncoming.filter(
+            (a) => !savedIds.has(a.id) && !savedNames.has((a.name || '').toLowerCase().trim())
+          );
+          if (newSavedArt.length > 0) {
+            const combinedSavedArt = [...prevSavedArt, ...newSavedArt];
+            setSavedArtists(combinedSavedArt);
+            persistWithLog(
+              'savedArtists',
+              () => StorageService.saveSavedArtists(combinedSavedArt),
+              combinedSavedArt
+            );
+          }
+        }
+        emit(
+          `Artists merged: ${newImpArtists.length} new (${combinedImpArtists.length} total, ${bookmarkedIncoming.length} bookmarked)`
+        );
+      }
+      await yieldMain();
+
+      // 6. Merge Imported Albums & ONLY Bookmarked Saved Albums
+      if (summary.importedAlbums.length > 0) {
+        const prevImpAlbums = importedAlbumsRef.current;
+        const incomingAlbById = new Map<string, Album>();
+        const incomingAlbByTitle = new Map<string, Album>();
+        summary.importedAlbums.forEach((a) => {
+          incomingAlbById.set(a.id, a);
+          const tKey = (a.title || '').toLowerCase().trim();
+          if (tKey && !incomingAlbByTitle.has(tKey)) incomingAlbByTitle.set(tKey, a);
+        });
+
+        const matchedAlbIds = new Set<string>();
+        const updatedImpAlbums = prevImpAlbums.map((existing) => {
+          const tKey = (existing.title || '').toLowerCase().trim();
+          const fresh = incomingAlbById.get(existing.id) || (tKey ? incomingAlbByTitle.get(tKey) : undefined);
+          if (!fresh) return existing;
+          matchedAlbIds.add(fresh.id);
+          return {
+            ...existing,
+            coverUrl: existing.coverUrl || fresh.coverUrl,
+            bookmarkedAt: existing.bookmarkedAt || fresh.bookmarkedAt,
+            shareUrl: existing.shareUrl || fresh.shareUrl,
+            timestamp: fresh.timestamp || existing.timestamp,
+            songs: fresh.songs && fresh.songs.length > 0 ? fresh.songs : existing.songs,
+          };
+        });
+        const newImpAlbums = summary.importedAlbums.filter((a) => !matchedAlbIds.has(a.id));
+        const combinedImpAlbums = [...updatedImpAlbums, ...newImpAlbums];
+        setImportedAlbums(combinedImpAlbums);
+        persistWithLog(
+          'importedAlbums',
+          () => StorageService.saveCustomAlbums(combinedImpAlbums),
+          combinedImpAlbums
+        );
+
+        const bookmarkedIncomingAlbums = summary.importedAlbums.filter(
+          (a) => typeof a.bookmarkedAt === 'number' && a.bookmarkedAt > 0
+        );
+        if (bookmarkedIncomingAlbums.length > 0) {
+          const prevSavedAlb = savedAlbumsRef.current;
+          const savedIds = new Set(prevSavedAlb.map((a) => a.id));
+          const savedTitles = new Set(prevSavedAlb.map((a) => (a.title || '').toLowerCase().trim()));
+          const newSavedAlb = bookmarkedIncomingAlbums.filter(
+            (a) => !savedIds.has(a.id) && !savedTitles.has((a.title || '').toLowerCase().trim())
+          );
+          if (newSavedAlb.length > 0) {
+            const combinedSavedAlb = [...prevSavedAlb, ...newSavedAlb];
+            setSavedAlbums(combinedSavedAlb);
+            persistWithLog(
+              'savedAlbums',
+              () => StorageService.saveSavedAlbums(combinedSavedAlb),
+              combinedSavedAlb
+            );
+          }
+        }
+        emit(
+          `Albums merged: ${newImpAlbums.length} new (${combinedImpAlbums.length} total, ${bookmarkedIncomingAlbums.length} bookmarked)`
+        );
+      }
+      await yieldMain();
+
+      // 7. Idempotent User Stats merge (never double-count plays on re-import!)
+      const prevStats = userStatsRef.current;
+      const mergedSongPlayCounts: Record<string, number> = { ...(prevStats.songPlayCounts || {}) };
+      const mergedArtistPlayCounts: Record<string, number> = { ...(prevStats.artistPlayCounts || {}) };
+      let deltaPlays = 0;
+      let deltaSeconds = 0;
+
+      summary.importedSongs.forEach((s) => {
+        const inc = s.playCount || 0;
+        const old = mergedSongPlayCounts[s.id] || 0;
+        if (inc > old) {
+          const diff = inc - old;
+          mergedSongPlayCounts[s.id] = inc;
+          deltaPlays += diff;
+          deltaSeconds += diff * (s.duration || 180);
+          if (s.artist) {
+            mergedArtistPlayCounts[s.artist] = (mergedArtistPlayCounts[s.artist] || 0) + diff;
+          }
+        }
+      });
+
+      const updatedStats: UserStats = {
+        ...prevStats,
+        totalPlays: prevStats.totalPlays + deltaPlays,
+        totalMinutes: prevStats.totalMinutes + Math.round(deltaSeconds / 60),
+        songPlayCounts: mergedSongPlayCounts,
+        artistPlayCounts: mergedArtistPlayCounts,
+      };
+      setUserStats(updatedStats);
+      persistWithLog('userStats', () => StorageService.saveUserStats(updatedStats));
+
+      // 8. Only initialize queue if current queue is empty (don't clobber active listening session on re-import!)
+      if (queueRef.current.length === 0) {
+        if (summary.importedPlaylists.length > 0 && summary.importedPlaylists[0].songs.length > 0) {
+          const firstPl = summary.importedPlaylists[0];
+          setQueue(firstPl.songs);
+          setQueueIndex(0);
+          setCurrentSong(firstPl.songs[0]);
+          emit(`Initialized empty queue with playlist "${firstPl.title}"`);
+        } else if (summary.importedLikedSongs.length > 0) {
+          setQueue(summary.importedLikedSongs);
+          setQueueIndex(0);
+          setCurrentSong(summary.importedLikedSongs[0]);
+          emit(`Initialized empty queue with Liked Songs`);
+        }
+      } else {
+        // Enrich current queue tracks in-place without interrupting playback
+        setQueue((prev) => prev.map(enrichSong));
+      }
+
+      setLastImportSummary(summary);
+      persistWithLog('lastImportSummary', () => StorageService.saveLastImportSummary(summary));
+      emit('Re-import & merge finished cleanly with zero errors.');
+
+      summary.logs = collectedLogs;
+      return summary;
+    } finally {
+      isRiplayImportingRef.current = false;
     }
+  };
 
-    setLastImportSummary(summary);
-    StorageService.saveLastImportSummary(summary);
+  const exportRiplaySqliteBackup = async (
+    onLog?: (msg: string) => void
+  ): Promise<RiplayExportResult> => {
+    if (isRiplayExportingRef.current) {
+      throw new Error('An export is already in progress. Please wait.');
+    }
+    isRiplayExportingRef.current = true;
+    try {
+      hapticFeedback();
+      await new Promise<void>((r) => setTimeout(r, 10));
 
-    return summary;
+      const result = await RiplaySqliteImporter.exportToDatabaseBuffer(
+        {
+          playlists: playlistsRef.current,
+          likedSongs: likedSongsRef.current,
+          history: historyRef.current,
+          blacklist: blacklistRef.current,
+          importedArtists: importedArtistsRef.current,
+          savedArtists: savedArtistsRef.current,
+          importedAlbums: importedAlbumsRef.current,
+          savedAlbums: savedAlbumsRef.current,
+          userStats: userStatsRef.current,
+          queue: queueRef.current,
+        },
+        onLog
+      );
+
+      // Trigger file download cleanly across desktop & Android/iOS PWAs
+      const blob = new Blob([new Uint8Array(result.buffer)], {
+        type: 'application/x-sqlite3',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = result.fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.setTimeout(() => URL.revokeObjectURL(url), 5000);
+
+      showToast(`Exported ${result.fileName} (${result.songsCount} songs, ${result.playlistsCount} playlists)`);
+      return result;
+    } finally {
+      isRiplayExportingRef.current = false;
+    }
   };
 
   // Stop any active candidate test preview inside SyncSongModal
@@ -3121,6 +3399,10 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           updateCacheConfig,
           storageEstimate,
           importRiplaySqliteBackup,
+          exportRiplaySqliteBackup,
+          riplayModalMode,
+          setRiplayModalMode,
+          openRiplayModal,
           importedArtists,
           importedAlbums,
           lastImportSummary,

@@ -14,10 +14,12 @@ export interface Song {
   genre?: string;
   year?: number | string;
   liked?: boolean;
+  likedAt?: number;
   playCount?: number;
   lastPlayedAt?: number;
   addedAt?: number;
   syncedAt?: number;
+  totalPlayTimeMs?: number;
 }
 
 export interface Artist {
@@ -28,6 +30,8 @@ export interface Artist {
   subscribers?: string;
   bio?: string;
   topSongs: Song[];
+  bookmarkedAt?: number | null;
+  timestamp?: number;
 }
 
 export interface Album {
@@ -37,6 +41,9 @@ export interface Album {
   year: number | string;
   coverUrl: string;
   songs: Song[];
+  bookmarkedAt?: number | null;
+  shareUrl?: string;
+  timestamp?: number;
 }
 
 export interface Playlist {
@@ -49,6 +56,7 @@ export interface Playlist {
   type?: 'liked' | 'history' | 'downloaded' | 'custom';
   songs: Song[];
   createdAt: number;
+  browseId?: string;
 }
 
 export interface NamedQueue {

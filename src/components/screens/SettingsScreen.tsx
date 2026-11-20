@@ -38,7 +38,7 @@ export const SettingsScreen: React.FC = () => {
     setIsEqualizerOpen,
     setIsSleepTimerOpen,
     setIsPWAInstallModalOpen,
-    setIsRiplayImportOpen,
+    openRiplayModal,
     lastImportSummary,
     hapticFeedback,
     cacheConfig,
@@ -351,16 +351,16 @@ export const SettingsScreen: React.FC = () => {
                 <div className="text-sm font-black text-white flex items-center gap-1.5">
                   RiPlay SQLite Database
                   <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-500/30 text-emerald-300">
-                    Room DB
+                    2-Way Sync
                   </span>
                 </div>
-                <div className="text-[11px] opacity-60">Upload .db, .backup, or .sqlite files</div>
+                <div className="text-[11px] opacity-60">Import & export .db, .backup, or .sqlite files</div>
               </div>
             </div>
           </div>
 
           <p className="text-xs opacity-75 leading-relaxed">
-            Directly upload SQLite database backups exported from the <strong>RiPlay</strong> or <strong>RiMusic</strong> Android apps. Extracts all songs, playlists with original ordering, lyrics, listening history, and blacklists.
+            Sync directly with <strong>RiPlay</strong> or <strong>RiMusic</strong> Android apps. Import backups cleanly or export Muzika's songs, playlists, likes, lyrics, history, and stats back into a RiPlay-compatible <code>.db</code> file.
           </p>
 
           {lastImportSummary && (
@@ -375,17 +375,30 @@ export const SettingsScreen: React.FC = () => {
             </div>
           )}
 
-          <button
-            onClick={() => {
-              hapticFeedback();
-              setIsRiplayImportOpen(true);
-            }}
-            className="w-full py-3 px-4 rounded-2xl text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg transition active:scale-95"
-            style={{ backgroundColor: themeColors.accent }}
-          >
-            <Database className="w-4 h-4" />
-            <span>Upload RiPlay Database (.db / .backup)</span>
-          </button>
+          <div className="grid grid-cols-2 gap-2.5">
+            <button
+              onClick={() => {
+                hapticFeedback();
+                openRiplayModal('import');
+              }}
+              className="py-3 px-3 rounded-2xl text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-lg transition active:scale-95"
+              style={{ backgroundColor: themeColors.accent }}
+            >
+              <Upload className="w-4 h-4 shrink-0" />
+              <span>Import .db</span>
+            </button>
+
+            <button
+              onClick={() => {
+                hapticFeedback();
+                openRiplayModal('export');
+              }}
+              className="py-3 px-3 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/10 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95"
+            >
+              <Download className="w-4 h-4 shrink-0 text-emerald-400" />
+              <span>Export to RiPlay</span>
+            </button>
+          </div>
         </div>
 
         {/* JSON Backup Tools */}

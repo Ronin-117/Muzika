@@ -273,7 +273,20 @@ export class StorageService {
 
   static saveLastImportSummary(summary: any): void {
     try {
-      localStorage.setItem(STORAGE_KEYS.RIPLAY_IMPORT_STATS, JSON.stringify(summary));
+      const compact = summary
+        ? {
+            songsCount: summary.songsCount || 0,
+            playlistsCount: summary.playlistsCount || 0,
+            artistsCount: summary.artistsCount || 0,
+            albumsCount: summary.albumsCount || 0,
+            historyCount: summary.historyCount || 0,
+            blacklistCount: summary.blacklistCount || 0,
+            likedSongsCount: summary.likedSongsCount || 0,
+            tablesFound: Array.isArray(summary.tablesFound) ? summary.tablesFound : [],
+            importedAt: summary.importedAt || Date.now(),
+          }
+        : null;
+      localStorage.setItem(STORAGE_KEYS.RIPLAY_IMPORT_STATS, JSON.stringify(compact));
     } catch (e) {
       console.warn('Storage write error:', e);
     }
