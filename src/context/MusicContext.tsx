@@ -11,6 +11,7 @@ import {
   UserStats,
   LyricsData,
   NamedQueue,
+  QueueSchedule,
 } from '../types/music';
 import { StorageService } from '../services/storageService';
 import { fetchLyricsFromLrcLib, parseLrcString } from '../services/lyricsService';
@@ -41,6 +42,44 @@ interface PlaybackTimeContextType {
 const PlaybackTimeContext = createContext<PlaybackTimeContextType>({ currentTime: 0, duration: 0 });
 
 export const usePlaybackTime = () => useContext(PlaybackTimeContext);
+
+const parseScheduleMinutes = (hhmm: string): number | null => {
+  if (!hhmm || typeof hhmm !== 'string') return null;
+  const parts = hhmm.split(':');
+  if (parts.length !== 2) return null;
+  const h = Number(parts[0]);
+  const m = Number(parts[1]);
+  if (!Number.isInteger(h) || !Number.isInteger(m) || h < 0 || h > 23 || m < 0 || m > 59) return null;
+  return h * 60 + m;
+};
+
+export const isQueueScheduleActive = (schedule: QueueSchedule, now: Date = new Date()): boolean => {
+  if (schedule.enabled === false) return false;
+  const startMins = parseScheduleMinutes(schedule.startTime);
+  const endMins = parseScheduleMinutes(schedule.endTime);
+  if (startMins === null || endMins === null || startMins === endMins) return false;
+
+  const today = now.getDay();
+  const yesterday = (today + 6) % 7;
+  const nowMins = now.getHours() * 60 + now.getMinutes();
+  const days = schedule.days;
+  const matchesDay = (day: number) => !days || days.length === 0 || days.includes(day);
+
+  if (startMins < endMins) {
+    return matchesDay(today) && nowMins >= startMins && nowMins < endMins;
+  }
+  // Overnight window (e.g., 22:00 -> 06:00)
+  return (matchesDay(today) && nowMins >= startMins) || (matchesDay(yesterday) && nowMins < endMins);
+};
+
+export const findMatchingScheduledQueue = (queues: NamedQueue[], now: Date = new Date()): NamedQueue | null => {
+  for (const q of queues) {
+    if (q.schedules && q.schedules.some((s) => isQueueScheduleActive(s, now))) {
+      return q;
+    }
+  }
+  return null;
+};
 
 interface MusicContextType {
   // Current playback state
@@ -123,6 +162,7 @@ interface MusicContextType {
   createQueue: (name: string, songs?: Song[]) => void;
   renameQueue: (queueId: string, newName: string) => void;
   deleteQueue: (queueId: string) => void;
+  updateQueueSchedules: (queueId: string, schedules: QueueSchedule[]) => void;
   addPlaylistToQueue: (playlistOrSongs: Playlist | Song[], mode?: 'replace' | 'append' | 'next') => void;
 
   // Call & Audio Interruption Auto-Resume (Default ON)
@@ -437,15 +477,103 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     }
   }, []);
 
-  // Playback state restored from last session (Rewind support)
+  // Playback state restored from last session (Rewind support) & startup-only Queue Schedule check
   const initialPlaybackState = useMemo(() => StorageService.getLastPlaybackState(), []);
 
-  const [queue, setQueue] = useState<Song[]>(() => (initialPlaybackState?.queue?.length ? initialPlaybackState.queue : []));
-  const [queueIndex, setQueueIndex] = useState<number>(() => initialPlaybackState?.queueIndex ?? 0);
-  const [currentSong, setCurrentSong] = useState<Song | null>(() => initialPlaybackState?.song ?? null);
+  const startupQueueResolution = useMemo(() => {
+    const savedMultiEnabled = StorageService.getEnableMultipleQueues();
+    const savedActiveId = StorageService.getActiveQueueId();
+    const savedNamedQueues = StorageService.getNamedQueues();
+
+    const defaultQueue: Song[] = initialPlaybackState?.queue?.length ? initialPlaybackState.queue : [];
+    const defaultQueueIdx: number = initialPlaybackState?.queueIndex ?? 0;
+    const defaultSong: Song | null = initialPlaybackState?.song ?? null;
+    const defaultCurrentTime: number = initialPlaybackState?.currentTime ?? 0;
+    const defaultDuration: number = initialPlaybackState?.duration ?? 0;
+
+    const baseQueues: NamedQueue[] =
+      savedNamedQueues && savedNamedQueues.length > 0
+        ? savedNamedQueues
+        : [{ id: 'queue-main', name: 'Main Queue', songs: [...defaultQueue], queueIndex: defaultQueueIdx, createdAt: Date.now() }];
+
+    if (!savedMultiEnabled || baseQueues.length === 0) {
+      return {
+        enableMultipleQueues: savedMultiEnabled,
+        activeQueueId: savedActiveId,
+        queues: baseQueues,
+        queue: defaultQueue,
+        queueIndex: defaultQueueIdx,
+        currentSong: defaultSong,
+        currentTime: defaultCurrentTime,
+        duration: defaultDuration,
+        switchedToName: null as string | null,
+      };
+    }
+
+    // Keep previous active queue snapshot synced before evaluating startup schedules
+    const syncedQueues = baseQueues.map((q) =>
+      q.id === savedActiveId && defaultQueue.length > 0
+        ? { ...q, songs: [...defaultQueue], queueIndex: defaultQueueIdx, currentTime: defaultCurrentTime }
+        : q
+    );
+
+    const matched = findMatchingScheduledQueue(syncedQueues, new Date());
+    if (matched && matched.id !== savedActiveId) {
+      const targetSongs = matched.songs && matched.songs.length > 0 ? [...matched.songs] : [];
+      const targetIdx =
+        targetSongs.length > 0
+          ? Math.min(Math.max(0, matched.queueIndex || 0), targetSongs.length - 1)
+          : 0;
+      const targetSong = targetSongs[targetIdx] || targetSongs[0] || null;
+      const targetTime = matched.currentTime ?? 0;
+      const targetDuration = targetSong?.duration || 0;
+
+      StorageService.saveNamedQueues(syncedQueues);
+      StorageService.saveActiveQueueId(matched.id);
+      if (targetSong) {
+        StorageService.saveLastPlaybackState({
+          song: targetSong,
+          currentTime: targetTime,
+          duration: targetDuration,
+          queueIndex: targetIdx,
+          queue: targetSongs,
+        });
+      } else {
+        StorageService.clearLastPlaybackState();
+      }
+
+      return {
+        enableMultipleQueues: savedMultiEnabled,
+        activeQueueId: matched.id,
+        queues: syncedQueues,
+        queue: targetSongs,
+        queueIndex: targetIdx,
+        currentSong: targetSong,
+        currentTime: targetTime,
+        duration: targetDuration,
+        switchedToName: matched.name,
+      };
+    }
+
+    return {
+      enableMultipleQueues: savedMultiEnabled,
+      activeQueueId: savedActiveId,
+      queues: syncedQueues,
+      queue: defaultQueue,
+      queueIndex: defaultQueueIdx,
+      currentSong: defaultSong,
+      currentTime: defaultCurrentTime,
+      duration: defaultDuration,
+      switchedToName: null as string | null,
+    };
+  }, [initialPlaybackState]);
+
+  const [queue, setQueue] = useState<Song[]>(() => startupQueueResolution.queue);
+  const [queueIndex, setQueueIndex] = useState<number>(() => startupQueueResolution.queueIndex);
+  const [currentSong, setCurrentSong] = useState<Song | null>(() => startupQueueResolution.currentSong);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [currentTime, setCurrentTime] = useState<number>(() => initialPlaybackState?.currentTime ?? 0);
-  const [duration, setDuration] = useState<number>(() => initialPlaybackState?.duration ?? 0);
+  const [currentTime, setCurrentTime] = useState<number>(() => startupQueueResolution.currentTime);
+  const [duration, setDuration] = useState<number>(() => startupQueueResolution.duration);
   const currentTimeRef = useRef<number>(currentTime);
   const durationRef = useRef<number>(duration);
   currentTimeRef.current = currentTime;
@@ -617,19 +745,22 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   autoResumeOnCallRef.current = autoResumeOnCall;
 
   // Multiple Queues feature (Toggleable in Settings)
-  const [enableMultipleQueues, setEnableMultipleQueuesState] = useState<boolean>(() => StorageService.getEnableMultipleQueues());
+  const [enableMultipleQueues, setEnableMultipleQueuesState] = useState<boolean>(() => startupQueueResolution.enableMultipleQueues);
   const enableMultipleQueuesRef = useRef<boolean>(enableMultipleQueues);
   enableMultipleQueuesRef.current = enableMultipleQueues;
-  const [activeQueueId, setActiveQueueIdState] = useState<string>(() => StorageService.getActiveQueueId());
+  const [activeQueueId, setActiveQueueIdState] = useState<string>(() => startupQueueResolution.activeQueueId);
   const activeQueueIdRef = useRef<string>(activeQueueId);
-  const [queues, setQueuesState] = useState<NamedQueue[]>(() => {
-    const saved = StorageService.getNamedQueues();
-    if (saved && saved.length > 0) return saved;
-    return [
-      { id: 'queue-main', name: 'Main Queue', songs: [...queue], queueIndex: 0, createdAt: Date.now() },
-    ];
-  });
+  const [queues, setQueuesState] = useState<NamedQueue[]>(() => startupQueueResolution.queues);
   const queuesRef = useRef<NamedQueue[]>(queues);
+
+  const startupScheduleToastShownRef = useRef<boolean>(false);
+  useEffect(() => {
+    if (startupScheduleToastShownRef.current) return;
+    startupScheduleToastShownRef.current = true;
+    if (startupQueueResolution.switchedToName) {
+      showToast(`Switched to scheduled queue "${startupQueueResolution.switchedToName}"`);
+    }
+  }, [startupQueueResolution.switchedToName]);
 
   const setEnableMultipleQueues = (enabled: boolean) => {
     hapticFeedback();
@@ -824,6 +955,20 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     if (wasActive) {
       switchQueue('queue-main');
     }
+  };
+
+  const updateQueueSchedules = (queueId: string, schedules: QueueSchedule[]) => {
+    hapticFeedback();
+    if (namedQueuesSaveTimerRef.current) {
+      window.clearTimeout(namedQueuesSaveTimerRef.current);
+      namedQueuesSaveTimerRef.current = null;
+    }
+    const updated = queuesRef.current.map((q) =>
+      q.id === queueId ? { ...q, schedules } : q
+    );
+    queuesRef.current = updated;
+    setQueuesState(updated);
+    StorageService.saveNamedQueues(updated);
   };
 
   const addPlaylistToQueue = (playlistOrSongs: Playlist | Song[], mode: 'replace' | 'append' | 'next' = 'append') => {
@@ -3698,6 +3843,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           createQueue,
           renameQueue,
           deleteQueue,
+          updateQueueSchedules,
           addPlaylistToQueue,
           autoResumeOnCall,
           setAutoResumeOnCall,

@@ -1,4 +1,4 @@
-import { Song, Playlist, Artist, Album, EqualizerSettings, ThemeName, UserStats } from '../types/music';
+import { Song, Playlist, Artist, Album, EqualizerSettings, ThemeName, UserStats, NamedQueue } from '../types/music';
 
 const STORAGE_KEYS = {
   LIKED_SONGS: 'muzika_liked_songs',
@@ -322,6 +322,12 @@ export class StorageService {
     }
   }
 
+  static clearLastPlaybackState(): void {
+    try {
+      localStorage.removeItem(STORAGE_KEYS.LAST_PLAYBACK_STATE);
+    } catch {}
+  }
+
   static getEnableMultipleQueues(): boolean {
     try {
       return localStorage.getItem(STORAGE_KEYS.ENABLE_MULTIPLE_QUEUES) === 'true';
@@ -336,7 +342,7 @@ export class StorageService {
     } catch {}
   }
 
-  static getNamedQueues(): any[] {
+  static getNamedQueues(): NamedQueue[] {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.NAMED_QUEUES);
       if (data) return JSON.parse(data);
@@ -344,7 +350,7 @@ export class StorageService {
     return [];
   }
 
-  static saveNamedQueues(queues: any[]): void {
+  static saveNamedQueues(queues: NamedQueue[]): void {
     try {
       localStorage.setItem(STORAGE_KEYS.NAMED_QUEUES, JSON.stringify(queues));
     } catch {}

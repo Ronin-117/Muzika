@@ -59,6 +59,14 @@ export interface Playlist {
   browseId?: string;
 }
 
+export interface QueueSchedule {
+  id: string;
+  startTime: string; // "HH:MM" 24-hour format
+  endTime: string;   // "HH:MM" 24-hour format
+  days?: number[];   // 0=Sun..6=Sat; empty or undefined = Every day
+  enabled?: boolean; // default true
+}
+
 export interface NamedQueue {
   id: string;
   name: string;
@@ -66,6 +74,7 @@ export interface NamedQueue {
   queueIndex: number;
   currentTime?: number;
   createdAt: number;
+  schedules?: QueueSchedule[];
 }
 
 export interface SyncedLyricLine {
