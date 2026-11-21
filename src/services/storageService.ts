@@ -18,6 +18,7 @@ const STORAGE_KEYS = {
   ENABLE_MULTIPLE_QUEUES: 'muzika_enable_multiple_queues',
   NAMED_QUEUES: 'muzika_named_queues',
   ACTIVE_QUEUE_ID: 'muzika_active_queue_id',
+  LAST_DEFAULT_QUEUE_ID: 'muzika_last_default_queue_id',
   SONG_SYNC_OVERRIDES: 'muzika_song_sync_overrides',
   AUTO_RESUME_ON_CALL: 'muzika_auto_resume_on_call',
 };
@@ -367,6 +368,20 @@ export class StorageService {
   static saveActiveQueueId(id: string): void {
     try {
       localStorage.setItem(STORAGE_KEYS.ACTIVE_QUEUE_ID, id);
+    } catch {}
+  }
+
+  static getLastDefaultQueueId(): string | null {
+    try {
+      return localStorage.getItem(STORAGE_KEYS.LAST_DEFAULT_QUEUE_ID);
+    } catch {
+      return null;
+    }
+  }
+
+  static saveLastDefaultQueueId(id: string): void {
+    try {
+      localStorage.setItem(STORAGE_KEYS.LAST_DEFAULT_QUEUE_ID, id);
     } catch {}
   }
 

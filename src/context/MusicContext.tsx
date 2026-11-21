@@ -163,6 +163,7 @@ interface MusicContextType {
   renameQueue: (queueId: string, newName: string) => void;
   deleteQueue: (queueId: string) => void;
   updateQueueSchedules: (queueId: string, schedules: QueueSchedule[]) => void;
+  toggleDefaultQueue: (queueId: string) => void;
   addPlaylistToQueue: (playlistOrSongs: Playlist | Song[], mode?: 'replace' | 'append' | 'next') => void;
 
   // Call & Audio Interruption Auto-Resume (Default ON)
@@ -507,51 +508,62 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         currentTime: defaultCurrentTime,
         duration: defaultDuration,
         switchedToName: null as string | null,
+        switchedReason: null as 'schedule' | 'default' | null,
+        pickedDefaultId: null as string | null,
       };
     }
 
-    // Keep previous active queue snapshot synced before evaluating startup schedules
+    // Keep previous active queue snapshot synced before evaluating startup schedules/defaults
     const syncedQueues = baseQueues.map((q) =>
       q.id === savedActiveId && defaultQueue.length > 0
         ? { ...q, songs: [...defaultQueue], queueIndex: defaultQueueIdx, currentTime: defaultCurrentTime }
         : q
     );
 
-    const matched = findMatchingScheduledQueue(syncedQueues, new Date());
-    if (matched && matched.id !== savedActiveId) {
-      const targetSongs = matched.songs && matched.songs.length > 0 ? [...matched.songs] : [];
+    // Priority 1: Active timing schedule
+    let targetQueue = findMatchingScheduledQueue(syncedQueues, new Date());
+    let reason: 'schedule' | 'default' | null = targetQueue ? 'schedule' : null;
+    let pickedDefaultId: string | null = null;
+
+    // Priority 2: If no schedule matches, fall back to Default queue(s) if any are selected
+    if (!targetQueue) {
+      const defaultQueues = syncedQueues.filter((q) => q.isDefault === true);
+      if (defaultQueues.length === 1) {
+        targetQueue = defaultQueues[0];
+        reason = 'default';
+        pickedDefaultId = targetQueue.id;
+      } else if (defaultQueues.length > 1) {
+        const lastDefaultId = StorageService.getLastDefaultQueueId();
+        const lastIdx = defaultQueues.findIndex((q) => q.id === lastDefaultId);
+        const nextIdx = lastIdx === -1 ? 0 : (lastIdx + 1) % defaultQueues.length;
+        targetQueue = defaultQueues[nextIdx];
+        reason = 'default';
+        pickedDefaultId = targetQueue.id;
+      }
+    }
+
+    if (targetQueue && targetQueue.id !== savedActiveId) {
+      const targetSongs = targetQueue.songs && targetQueue.songs.length > 0 ? [...targetQueue.songs] : [];
       const targetIdx =
         targetSongs.length > 0
-          ? Math.min(Math.max(0, matched.queueIndex || 0), targetSongs.length - 1)
+          ? Math.min(Math.max(0, targetQueue.queueIndex || 0), targetSongs.length - 1)
           : 0;
       const targetSong = targetSongs[targetIdx] || targetSongs[0] || null;
-      const targetTime = matched.currentTime ?? 0;
+      const targetTime = targetQueue.currentTime ?? 0;
       const targetDuration = targetSong?.duration || 0;
-
-      StorageService.saveNamedQueues(syncedQueues);
-      StorageService.saveActiveQueueId(matched.id);
-      if (targetSong) {
-        StorageService.saveLastPlaybackState({
-          song: targetSong,
-          currentTime: targetTime,
-          duration: targetDuration,
-          queueIndex: targetIdx,
-          queue: targetSongs,
-        });
-      } else {
-        StorageService.clearLastPlaybackState();
-      }
 
       return {
         enableMultipleQueues: savedMultiEnabled,
-        activeQueueId: matched.id,
+        activeQueueId: targetQueue.id,
         queues: syncedQueues,
         queue: targetSongs,
         queueIndex: targetIdx,
         currentSong: targetSong,
         currentTime: targetTime,
         duration: targetDuration,
-        switchedToName: matched.name,
+        switchedToName: targetQueue.name,
+        switchedReason: reason,
+        pickedDefaultId,
       };
     }
 
@@ -565,6 +577,8 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       currentTime: defaultCurrentTime,
       duration: defaultDuration,
       switchedToName: null as string | null,
+      switchedReason: null as 'schedule' | 'default' | null,
+      pickedDefaultId,
     };
   }, [initialPlaybackState]);
 
@@ -757,10 +771,27 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   useEffect(() => {
     if (startupScheduleToastShownRef.current) return;
     startupScheduleToastShownRef.current = true;
-    if (startupQueueResolution.switchedToName) {
-      showToast(`Switched to scheduled queue "${startupQueueResolution.switchedToName}"`);
+    if (startupQueueResolution.pickedDefaultId) {
+      StorageService.saveLastDefaultQueueId(startupQueueResolution.pickedDefaultId);
     }
-  }, [startupQueueResolution.switchedToName]);
+    if (startupQueueResolution.switchedToName && startupQueueResolution.switchedReason) {
+      StorageService.saveNamedQueues(startupQueueResolution.queues);
+      StorageService.saveActiveQueueId(startupQueueResolution.activeQueueId);
+      if (startupQueueResolution.currentSong) {
+        StorageService.saveLastPlaybackState({
+          song: startupQueueResolution.currentSong,
+          currentTime: startupQueueResolution.currentTime,
+          duration: startupQueueResolution.duration,
+          queueIndex: startupQueueResolution.queueIndex,
+          queue: startupQueueResolution.queue,
+        });
+      } else {
+        StorageService.clearLastPlaybackState();
+      }
+      const label = startupQueueResolution.switchedReason === 'schedule' ? 'scheduled' : 'default';
+      showToast(`Switched to ${label} queue "${startupQueueResolution.switchedToName}"`);
+    }
+  }, [startupQueueResolution]);
 
   const setEnableMultipleQueues = (enabled: boolean) => {
     hapticFeedback();
@@ -965,6 +996,20 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     }
     const updated = queuesRef.current.map((q) =>
       q.id === queueId ? { ...q, schedules } : q
+    );
+    queuesRef.current = updated;
+    setQueuesState(updated);
+    StorageService.saveNamedQueues(updated);
+  };
+
+  const toggleDefaultQueue = (queueId: string) => {
+    hapticFeedback();
+    if (namedQueuesSaveTimerRef.current) {
+      window.clearTimeout(namedQueuesSaveTimerRef.current);
+      namedQueuesSaveTimerRef.current = null;
+    }
+    const updated = queuesRef.current.map((q) =>
+      q.id === queueId ? { ...q, isDefault: !q.isDefault } : q
     );
     queuesRef.current = updated;
     setQueuesState(updated);
@@ -3844,6 +3889,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           renameQueue,
           deleteQueue,
           updateQueueSchedules,
+          toggleDefaultQueue,
           addPlaylistToQueue,
           autoResumeOnCall,
           setAutoResumeOnCall,

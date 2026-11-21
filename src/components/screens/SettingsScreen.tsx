@@ -302,7 +302,7 @@ export const SettingsScreen: React.FC = () => {
             </button>
           </div>
           <p className="text-[11px] opacity-60 leading-relaxed">
-            When enabled, an interactive queue manager pill appears inside the player queue view, allowing you to create custom named queues, configure optional startup timing schedules, switch active listening states seamlessly, and rename or delete queues.
+            When enabled, an interactive queue manager pill appears inside the player queue view, allowing you to create custom named queues, configure startup timing schedules and default queues, switch active listening states seamlessly, and rename or delete queues.
           </p>
         </div>
       </section>

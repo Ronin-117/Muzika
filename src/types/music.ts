@@ -75,6 +75,7 @@ export interface NamedQueue {
   currentTime?: number;
   createdAt: number;
   schedules?: QueueSchedule[];
+  isDefault?: boolean;
 }
 
 export interface SyncedLyricLine {

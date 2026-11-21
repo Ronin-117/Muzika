@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { useMusic, useBackHandler, isQueueScheduleActive } from '../../context/MusicContext';
 import { QueueSchedule } from '../../types/music';
-import { Trash2, Music2, LocateFixed, Layers, Plus, Edit2, Check, X, ChevronDown, MoreVertical, Clock, ArrowLeft } from 'lucide-react';
+import { Trash2, Music2, LocateFixed, Layers, Plus, Edit2, Check, X, ChevronDown, MoreVertical, Clock, ArrowLeft, Star } from 'lucide-react';
 import { PlayingBars } from '../common/PlayingBars';
 
 const DAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
@@ -43,6 +43,7 @@ export const QueueView: React.FC = () => {
     renameQueue,
     deleteQueue,
     updateQueueSchedules,
+    toggleDefaultQueue,
     getSongCoverUrl,
     setSongOptionsMenuTarget,
   } = useMusic();
@@ -373,6 +374,37 @@ export const QueueView: React.FC = () => {
 
                 <div className="p-2.5 rounded-2xl bg-white/[0.04] border border-white/10 text-[11px] text-white/70 leading-relaxed shrink-0">
                   Muzika checks these windows <span className="text-white font-semibold">once when opened</span> and switches to this queue automatically if matched. You can still change queues manually anytime.
+                </div>
+
+                {/* Default Queue Toggle (Used when no schedule is active) */}
+                <div className="p-3 rounded-2xl bg-white/[0.05] border border-white/10 flex items-center justify-between gap-3 shrink-0">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-white">
+                      <Star
+                        className={`w-3.5 h-3.5 shrink-0 ${
+                          schedulingQueue.isDefault ? 'text-amber-400 fill-amber-400' : 'text-white/50'
+                        }`}
+                      />
+                      <span>Default Queue (No Schedule)</span>
+                    </div>
+                    <p className="text-[10px] text-white/55 leading-snug mt-0.5">
+                      Selected on startup when no schedule matches. Multiple defaults rotate; if none are set, your last queue stays selected.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => toggleDefaultQueue(schedulingQueue.id)}
+                    className={`w-10 h-5 rounded-full transition-colors relative flex items-center p-0.5 cursor-pointer shrink-0 ${
+                      schedulingQueue.isDefault ? 'bg-amber-400' : 'bg-white/15'
+                    }`}
+                    title={schedulingQueue.isDefault ? 'Remove default status' : 'Set as default queue'}
+                  >
+                    <div
+                      className={`w-4 h-4 rounded-full bg-white transition-transform shadow-sm ${
+                        schedulingQueue.isDefault ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
                 </div>
 
                 <div className="flex-1 overflow-y-auto space-y-3 no-scrollbar pr-1">
@@ -722,11 +754,18 @@ export const QueueView: React.FC = () => {
                               }`}
                             />
                             <div className="min-w-0">
-                              <div className={`text-xs sm:text-sm font-bold truncate ${isActive ? 'text-emerald-400' : 'text-white'}`}>
-                                {q.name}
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <span className={`text-xs sm:text-sm font-bold truncate ${isActive ? 'text-emerald-400' : 'text-white'}`}>
+                                  {q.name}
+                                </span>
+                                {q.isDefault && (
+                                  <span className="px-1.5 py-0.5 rounded-md bg-amber-400/20 border border-amber-400/30 text-amber-300 text-[9px] font-bold uppercase tracking-wider shrink-0">
+                                    Default
+                                  </span>
+                                )}
                               </div>
-                              <div className="text-[10px] opacity-50 font-mono flex items-center gap-1.5 flex-wrap">
-                                <span>{trackCount} {trackCount === 1 ? 'track' : 'tracks'}</span>
+                              <div className="text-[10px] font-mono flex items-center gap-1.5 flex-wrap mt-0.5">
+                                <span className="text-white/50">{trackCount} {trackCount === 1 ? 'track' : 'tracks'}</span>
                                 {schedSummary && (
                                   <span className="inline-flex items-center gap-0.5 text-emerald-300/90 font-sans font-semibold">
                                     <Clock className="w-2.5 h-2.5" />
@@ -740,6 +779,18 @@ export const QueueView: React.FC = () => {
 
                         {!isEditing && (
                           <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              onClick={() => toggleDefaultQueue(q.id)}
+                              className={`p-1.5 rounded-lg transition ${
+                                q.isDefault
+                                  ? 'text-amber-400 bg-amber-400/15 hover:bg-amber-400/25'
+                                  : 'opacity-45 hover:opacity-100 hover:bg-white/10 text-white'
+                              }`}
+                              title={q.isDefault ? 'Default queue (tap to unset)' : 'Set as default queue outside schedules'}
+                            >
+                              <Star className={`w-3.5 h-3.5 ${q.isDefault ? 'fill-amber-400' : ''}`} />
+                            </button>
+
                             <button
                               onClick={() => {
                                 hapticFeedback();
