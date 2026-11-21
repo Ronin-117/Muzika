@@ -148,6 +148,90 @@ class RiplaySyncStore {
   async getCatalogSnapshot(): Promise<RiplaySyncCatalogSnapshot | null> {
     return this.getValue<RiplaySyncCatalogSnapshot>('catalog');
   }
+
+  async saveAlbumTracks(albumId: string, songs: Song[]): Promise<void> {
+    if (!albumId || !songs || songs.length === 0) return;
+    const existing = (await this.getValue<Record<string, Song[]>>('album_tracks_v1')) || {};
+    existing[albumId] = songs;
+    await this.putValue('album_tracks_v1', existing);
+  }
+
+  async saveAlbumTracksBatch(entries: { id: string; songs: Song[] }[]): Promise<void> {
+    const valid = entries.filter((e) => e.id && e.songs && e.songs.length > 0);
+    if (valid.length === 0) return;
+    const existing = (await this.getValue<Record<string, Song[]>>('album_tracks_v1')) || {};
+    for (const item of valid) {
+      existing[item.id] = item.songs;
+    }
+    await this.putValue('album_tracks_v1', existing);
+  }
+
+  async getAlbumTracks(albumId: string): Promise<Song[] | null> {
+    if (!albumId) return null;
+    const map = await this.getValue<Record<string, Song[]>>('album_tracks_v1');
+    return map?.[albumId] || null;
+  }
+
+  async getAllAlbumTracks(): Promise<Record<string, Song[]>> {
+    return (await this.getValue<Record<string, Song[]>>('album_tracks_v1')) || {};
+  }
+
+  async saveArtistTracks(
+    artistId: string,
+    data: { topSongs: Song[]; bannerUrl?: string; subscribers?: string; bio?: string }
+  ): Promise<void> {
+    if (!artistId || !data?.topSongs || data.topSongs.length === 0) return;
+    const existing =
+      (await this.getValue<
+        Record<string, { topSongs: Song[]; bannerUrl?: string; subscribers?: string; bio?: string }>
+      >('artist_tracks_v1')) || {};
+    existing[artistId] = {
+      ...(existing[artistId] || {}),
+      ...data,
+    };
+    await this.putValue('artist_tracks_v1', existing);
+  }
+
+  async saveArtistTracksBatch(
+    entries: { id: string; topSongs: Song[]; bannerUrl?: string; subscribers?: string; bio?: string }[]
+  ): Promise<void> {
+    const valid = entries.filter((e) => e.id && e.topSongs && e.topSongs.length > 0);
+    if (valid.length === 0) return;
+    const existing =
+      (await this.getValue<
+        Record<string, { topSongs: Song[]; bannerUrl?: string; subscribers?: string; bio?: string }>
+      >('artist_tracks_v1')) || {};
+    for (const item of valid) {
+      existing[item.id] = {
+        ...(existing[item.id] || {}),
+        topSongs: item.topSongs,
+        bannerUrl: item.bannerUrl || existing[item.id]?.bannerUrl,
+        subscribers: item.subscribers || existing[item.id]?.subscribers,
+        bio: item.bio || existing[item.id]?.bio,
+      };
+    }
+    await this.putValue('artist_tracks_v1', existing);
+  }
+
+  async getArtistTracks(
+    artistId: string
+  ): Promise<{ topSongs: Song[]; bannerUrl?: string; subscribers?: string; bio?: string } | null> {
+    if (!artistId) return null;
+    const map = await this.getValue<
+      Record<string, { topSongs: Song[]; bannerUrl?: string; subscribers?: string; bio?: string }>
+    >('artist_tracks_v1');
+    return map?.[artistId] || null;
+  }
+
+  async getAllArtistTracks(): Promise<
+    Record<string, { topSongs: Song[]; bannerUrl?: string; subscribers?: string; bio?: string }>
+  > {
+    return (
+      (await this.getValue<
+        Record<string, { topSongs: Song[]; bannerUrl?: string; subscribers?: string; bio?: string }>
+      >('artist_tracks_v1')) || {}
+    );
+  }
 }
 
 export const riplaySyncStore = new RiplaySyncStore();

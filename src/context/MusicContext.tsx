@@ -27,6 +27,7 @@ import {
   RiplayImportSummary,
   RiplayExportResult,
 } from '../services/riplaySqliteImporter';
+import { riplaySyncStore } from '../services/riplaySyncStore';
 import { OnlineMusicService } from '../services/onlineMusicService';
 import { getSubAudibleAudioUri, audioFocusManager } from '../utils/audioWakeLock';
 import { extractDynamicPalette } from '../utils/colorExtractor';
@@ -197,9 +198,11 @@ interface MusicContextType {
   savedArtists: Artist[];
   toggleFollowArtist: (artist: Artist) => void;
   isArtistFollowed: (artistId: string) => boolean;
+  updateArtistTracks: (artistId: string, topSongs: Song[], meta?: Partial<Artist>) => void;
   savedAlbums: Album[];
   toggleSaveAlbum: (album: Album) => void;
   isAlbumSaved: (albumId: string) => boolean;
+  updateAlbumTracks: (albumId: string, songs: Song[], meta?: Partial<Album>) => void;
 
   // Modals, Quick Actions & Toast Notifications
   addToPlaylistTargetSong: Song | null;
@@ -526,6 +529,87 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   savedArtistsRef.current = savedArtists;
   const savedAlbumsRef = useRef<Album[]>(savedAlbums);
   savedAlbumsRef.current = savedAlbums;
+
+  // Hydrate persisted album & artist tracklists from IndexedDB on startup so saved/imported entities always open & play offline
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const [albumMap, artistMap] = await Promise.all([
+          riplaySyncStore.getAllAlbumTracks(),
+          riplaySyncStore.getAllArtistTracks(),
+        ]);
+        if (!mounted) return;
+
+        if (Object.keys(albumMap).length > 0) {
+          setSavedAlbums((prev) => {
+            let changed = false;
+            const next = prev.map((a) => {
+              if ((!a.songs || a.songs.length === 0) && albumMap[a.id]?.length) {
+                changed = true;
+                return { ...a, songs: albumMap[a.id] };
+              }
+              return a;
+            });
+            return changed ? next : prev;
+          });
+          setImportedAlbums((prev) => {
+            let changed = false;
+            const next = prev.map((a) => {
+              if ((!a.songs || a.songs.length === 0) && albumMap[a.id]?.length) {
+                changed = true;
+                return { ...a, songs: albumMap[a.id] };
+              }
+              return a;
+            });
+            return changed ? next : prev;
+          });
+        }
+
+        if (Object.keys(artistMap).length > 0) {
+          setSavedArtists((prev) => {
+            let changed = false;
+            const next = prev.map((a) => {
+              const cached = artistMap[a.id];
+              if (cached?.topSongs?.length && (!a.topSongs || a.topSongs.length === 0)) {
+                changed = true;
+                return {
+                  ...a,
+                  topSongs: cached.topSongs,
+                  bannerUrl: a.bannerUrl || cached.bannerUrl,
+                  subscribers: a.subscribers || cached.subscribers,
+                  bio: a.bio || cached.bio,
+                };
+              }
+              return a;
+            });
+            return changed ? next : prev;
+          });
+          setImportedArtists((prev) => {
+            let changed = false;
+            const next = prev.map((a) => {
+              const cached = artistMap[a.id];
+              if (cached?.topSongs?.length && (!a.topSongs || a.topSongs.length === 0)) {
+                changed = true;
+                return {
+                  ...a,
+                  topSongs: cached.topSongs,
+                  bannerUrl: a.bannerUrl || cached.bannerUrl,
+                  subscribers: a.subscribers || cached.subscribers,
+                  bio: a.bio || cached.bio,
+                };
+              }
+              return a;
+            });
+            return changed ? next : prev;
+          });
+        }
+      } catch {}
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   // Call / External Audio Interruption Auto-Pause & Auto-Resume (Default ON)
   const [autoResumeOnCall, setAutoResumeOnCallState] = useState<boolean>(() => StorageService.getAutoResumeOnCall());
@@ -2665,36 +2749,196 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     return savedArtists.some((a) => a.id === artistId);
   };
 
-  const toggleFollowArtist = (artist: Artist) => {
-    hapticFeedback();
+  const updateArtistTracks = useCallback((artistId: string, topSongs: Song[], meta?: Partial<Artist>) => {
+    if (!artistId || !topSongs || topSongs.length === 0) return;
+
+    // Persist in durable IndexedDB regardless of localStorage size limits
+    riplaySyncStore
+      .saveArtistTracks(artistId, {
+        topSongs,
+        bannerUrl: meta?.bannerUrl,
+        subscribers: meta?.subscribers,
+        bio: meta?.bio,
+      })
+      .catch(() => {});
+
     setSavedArtists((prev) => {
-      let updated: Artist[];
-      if (prev.some((a) => a.id === artist.id)) {
-        updated = prev.filter((a) => a.id !== artist.id);
-      } else {
-        updated = [artist, ...prev];
-      }
+      if (!prev.some((a) => a.id === artistId)) return prev;
+      const updated = prev.map((a) =>
+        a.id === artistId
+          ? {
+              ...a,
+              ...meta,
+              bannerUrl: meta?.bannerUrl || a.bannerUrl,
+              subscribers: meta?.subscribers || a.subscribers,
+              bio: meta?.bio || a.bio,
+              topSongs,
+            }
+          : a
+      );
       StorageService.saveSavedArtists(updated);
       return updated;
     });
+
+    setImportedArtists((prev) => {
+      if (!prev.some((a) => a.id === artistId)) return prev;
+      const updated = prev.map((a) =>
+        a.id === artistId
+          ? {
+              ...a,
+              ...meta,
+              bannerUrl: meta?.bannerUrl || a.bannerUrl,
+              subscribers: meta?.subscribers || a.subscribers,
+              bio: meta?.bio || a.bio,
+              topSongs,
+            }
+          : a
+      );
+      StorageService.saveCustomArtists(updated);
+      return updated;
+    });
+
+    setSelectedArtist((prev) =>
+      prev && prev.id === artistId
+        ? {
+            ...prev,
+            ...meta,
+            bannerUrl: meta?.bannerUrl || prev.bannerUrl,
+            subscribers: meta?.subscribers || prev.subscribers,
+            bio: meta?.bio || prev.bio,
+            topSongs,
+          }
+        : prev
+    );
+  }, []);
+
+  const toggleFollowArtist = (artist: Artist) => {
+    hapticFeedback();
+    const currentlyFollowed = savedArtistsRef.current.some((a) => a.id === artist.id);
+
+    if (currentlyFollowed) {
+      const updated = savedArtistsRef.current.filter((a) => a.id !== artist.id);
+      setSavedArtists(updated);
+      StorageService.saveSavedArtists(updated);
+      return;
+    }
+
+    // Attach best-known tracklist immediately from imported/selected records
+    const fromImported = importedArtistsRef.current.find((a) => a.id === artist.id);
+    const bestTopSongs =
+      artist.topSongs && artist.topSongs.length > 0
+        ? artist.topSongs
+        : fromImported?.topSongs && fromImported.topSongs.length > 0
+        ? fromImported.topSongs
+        : [];
+    const enrichedArtist: Artist = {
+      ...fromImported,
+      ...artist,
+      bookmarkedAt: artist.bookmarkedAt || Date.now(),
+      topSongs: bestTopSongs,
+    };
+
+    const updated = [enrichedArtist, ...savedArtistsRef.current];
+    setSavedArtists(updated);
+    StorageService.saveSavedArtists(updated);
+
+    if (bestTopSongs.length > 0) {
+      updateArtistTracks(artist.id, bestTopSongs, {
+        bannerUrl: enrichedArtist.bannerUrl,
+        subscribers: enrichedArtist.subscribers,
+        bio: enrichedArtist.bio,
+      });
+    } else if (typeof navigator === 'undefined' || navigator.onLine) {
+      // Background fetch top songs immediately so artist works offline right after saving
+      OnlineMusicService.fetchArtistTopSongs(artist.id)
+        .then((data) => {
+          if (data?.topSongs && data.topSongs.length > 0) {
+            updateArtistTracks(artist.id, data.topSongs, {
+              bannerUrl: data.bannerUrl || artist.bannerUrl,
+              subscribers: artist.subscribers,
+              bio: artist.bio,
+            });
+          }
+        })
+        .catch(() => {});
+    }
   };
 
   const isAlbumSaved = (albumId: string) => {
     return savedAlbums.some((a) => a.id === albumId);
   };
 
-  const toggleSaveAlbum = (album: Album) => {
-    hapticFeedback();
+  const updateAlbumTracks = useCallback((albumId: string, songs: Song[], meta?: Partial<Album>) => {
+    if (!albumId || !songs || songs.length === 0) return;
+
+    // Persist in durable IndexedDB so large tracklists survive quota pressure & work offline
+    riplaySyncStore.saveAlbumTracks(albumId, songs).catch(() => {});
+
     setSavedAlbums((prev) => {
-      let updated: Album[];
-      if (prev.some((a) => a.id === album.id)) {
-        updated = prev.filter((a) => a.id !== album.id);
-      } else {
-        updated = [album, ...prev];
-      }
+      if (!prev.some((a) => a.id === albumId)) return prev;
+      const updated = prev.map((a) =>
+        a.id === albumId ? { ...a, ...meta, songs } : a
+      );
       StorageService.saveSavedAlbums(updated);
       return updated;
     });
+
+    setImportedAlbums((prev) => {
+      if (!prev.some((a) => a.id === albumId)) return prev;
+      const updated = prev.map((a) =>
+        a.id === albumId ? { ...a, ...meta, songs } : a
+      );
+      StorageService.saveCustomAlbums(updated);
+      return updated;
+    });
+
+    setSelectedAlbumState((prev) =>
+      prev && prev.id === albumId ? { ...prev, ...meta, songs } : prev
+    );
+  }, []);
+
+  const toggleSaveAlbum = (album: Album) => {
+    hapticFeedback();
+    const currentlySaved = savedAlbumsRef.current.some((a) => a.id === album.id);
+
+    if (currentlySaved) {
+      const updated = savedAlbumsRef.current.filter((a) => a.id !== album.id);
+      setSavedAlbums(updated);
+      StorageService.saveSavedAlbums(updated);
+      return;
+    }
+
+    // Attach best-known tracklist immediately from imported/selected records
+    const fromImported = importedAlbumsRef.current.find((a) => a.id === album.id);
+    const bestSongs =
+      album.songs && album.songs.length > 0
+        ? album.songs
+        : fromImported?.songs && fromImported.songs.length > 0
+        ? fromImported.songs
+        : [];
+    const enrichedAlbum: Album = {
+      ...fromImported,
+      ...album,
+      bookmarkedAt: album.bookmarkedAt || Date.now(),
+      songs: bestSongs,
+    };
+
+    const updated = [enrichedAlbum, ...savedAlbumsRef.current];
+    setSavedAlbums(updated);
+    StorageService.saveSavedAlbums(updated);
+
+    if (bestSongs.length > 0) {
+      updateAlbumTracks(album.id, bestSongs);
+    } else if (typeof navigator === 'undefined' || navigator.onLine) {
+      // Background fetch album tracks immediately so album opens offline right away
+      OnlineMusicService.fetchAlbumTracks(album.id)
+        .then((tracks) => {
+          if (tracks && tracks.length > 0) {
+            updateAlbumTracks(album.id, tracks);
+          }
+        })
+        .catch(() => {});
+    }
   };
 
   const importRiplaySqliteBackup = async (
@@ -2965,6 +3209,22 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           `Albums merged: ${newImpAlbums.length} new (${combinedImpAlbums.length} total, ${bookmarkedIncomingAlbums.length} bookmarked)`
         );
       }
+
+      // Mirror non-empty imported artist & album tracklists into IndexedDB for offline resilience
+      riplaySyncStore
+        .saveArtistTracksBatch(
+          summary.importedArtists
+            .filter((a) => a.topSongs && a.topSongs.length > 0)
+            .map((a) => ({ id: a.id, topSongs: a.topSongs, bannerUrl: a.bannerUrl, subscribers: a.subscribers, bio: a.bio }))
+        )
+        .catch(() => {});
+      riplaySyncStore
+        .saveAlbumTracksBatch(
+          summary.importedAlbums
+            .filter((a) => a.songs && a.songs.length > 0)
+            .map((a) => ({ id: a.id, songs: a.songs }))
+        )
+        .catch(() => {});
       await yieldMain();
 
       // 7. Idempotent User Stats merge (never double-count plays on re-import!)
@@ -3409,9 +3669,11 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           savedArtists,
           toggleFollowArtist,
           isArtistFollowed,
+          updateArtistTracks,
           savedAlbums,
           toggleSaveAlbum,
           isAlbumSaved,
+          updateAlbumTracks,
           addToPlaylistTargetSong,
           setAddToPlaylistTargetSong,
           songOptionsMenuTarget,

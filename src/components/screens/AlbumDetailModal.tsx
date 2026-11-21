@@ -2,13 +2,17 @@ import React, { useState, useEffect } from 'react';
 import { useMusic, useBackHandler } from '../../context/MusicContext';
 import { ArrowLeft, Play, Shuffle, Disc, Heart, CheckCircle2, Bookmark, Check, Loader2, DownloadCloud, ListPlus, ListOrdered, ListVideo, X } from 'lucide-react';
 import { OnlineMusicService } from '../../services/onlineMusicService';
+import { riplaySyncStore } from '../../services/riplaySyncStore';
 import { Song } from '../../types/music';
 import { SwipeableSongRow } from '../common/SwipeableSongRow';
+import { PlayingBars, isSameSong } from '../common/PlayingBars';
 
 export const AlbumDetailModal: React.FC = () => {
   const {
     selectedAlbum,
     setSelectedAlbum,
+    currentSong,
+    isPlaying,
     playSong,
     themeColors,
     toggleLike,
@@ -21,8 +25,11 @@ export const AlbumDetailModal: React.FC = () => {
     batchCacheState,
     cacheSongsBatch,
     cancelBatchCache,
+    savedAlbums,
+    importedAlbums,
     toggleSaveAlbum,
     isAlbumSaved,
+    updateAlbumTracks,
     addPlaylistToQueue,
     getSongCoverUrl,
   } = useMusic();
@@ -33,40 +40,78 @@ export const AlbumDetailModal: React.FC = () => {
 
   useBackHandler(!!selectedAlbum && showQueueOptions, () => setShowQueueOptions(false));
 
+  // Resolve freshest album entity (so saved/imported persisted tracks always show immediately)
+  const liveAlbum = selectedAlbum
+    ? savedAlbums.find((a) => a.id === selectedAlbum.id) ||
+      importedAlbums.find((a) => a.id === selectedAlbum.id) ||
+      selectedAlbum
+    : null;
+
   useEffect(() => {
     if (!selectedAlbum) {
       setFetchedSongs([]);
       return;
     }
 
-    if (selectedAlbum.songs && selectedAlbum.songs.length > 0) {
-      setFetchedSongs(selectedAlbum.songs);
+    const existing = liveAlbum?.songs || selectedAlbum.songs;
+    if (existing && existing.length > 0) {
+      setFetchedSongs(existing);
       setIsLoadingTracks(false);
+      // Ensure IndexedDB mirror is up-to-date for offline access
+      riplaySyncStore.saveAlbumTracks(selectedAlbum.id, existing).catch(() => {});
       return;
     }
 
-    // Fetch verified YouTube Music album tracks dynamically
     let isMounted = true;
     setIsLoadingTracks(true);
-    OnlineMusicService.fetchAlbumTracks(selectedAlbum.id)
-      .then((songs) => {
+
+    (async () => {
+      try {
+        // 1. Check durable IndexedDB album tracklist cache first (works 100% offline!)
+        const cachedList = await riplaySyncStore.getAlbumTracks(selectedAlbum.id);
+        if (cachedList && cachedList.length > 0) {
+          if (isMounted) {
+            setFetchedSongs(cachedList);
+            setIsLoadingTracks(false);
+            updateAlbumTracks(selectedAlbum.id, cachedList);
+          }
+          return;
+        }
+
+        // 2. If offline and no cached tracks exist yet, stop cleanly without hanging
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          if (isMounted) setIsLoadingTracks(false);
+          return;
+        }
+
+        // 3. Fetch verified YouTube Music album tracks online and persist them for future offline opens
+        const songs = await OnlineMusicService.fetchAlbumTracks(selectedAlbum.id);
         if (isMounted) {
           setFetchedSongs(songs);
           setIsLoadingTracks(false);
         }
-      })
-      .catch(() => {
+        if (songs && songs.length > 0) {
+          await riplaySyncStore.saveAlbumTracks(selectedAlbum.id, songs);
+          updateAlbumTracks(selectedAlbum.id, songs);
+        }
+      } catch {
         if (isMounted) setIsLoadingTracks(false);
-      });
+      }
+    })();
 
     return () => {
       isMounted = false;
     };
   }, [selectedAlbum?.id]);
 
-  if (!selectedAlbum) return null;
+  if (!selectedAlbum || !liveAlbum) return null;
 
-  const currentSongs = fetchedSongs.length > 0 ? fetchedSongs : selectedAlbum.songs;
+  const currentSongs =
+    fetchedSongs.length > 0
+      ? fetchedSongs
+      : liveAlbum.songs && liveAlbum.songs.length > 0
+      ? liveAlbum.songs
+      : selectedAlbum.songs;
   const saved = isAlbumSaved(selectedAlbum.id);
   const totalDuration = currentSongs.reduce((acc, s) => acc + (s.duration || 0), 0);
   const totalMins = Math.floor(totalDuration / 60);
@@ -93,6 +138,13 @@ export const AlbumDetailModal: React.FC = () => {
     }
   };
 
+  const handleToggleSaveWithSongs = () => {
+    toggleSaveAlbum({
+      ...liveAlbum,
+      songs: currentSongs,
+    });
+  };
+
   return (
     <div
       className="fixed inset-0 z-40 flex flex-col overflow-y-auto animate-in slide-in-from-right duration-200 pb-44"
@@ -108,11 +160,11 @@ export const AlbumDetailModal: React.FC = () => {
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <span className="text-sm font-bold truncate">{selectedAlbum.title}</span>
+          <span className="text-sm font-bold truncate">{liveAlbum.title}</span>
         </div>
 
         <button
-          onClick={() => toggleSaveAlbum(selectedAlbum)}
+          onClick={handleToggleSaveWithSongs}
           className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition flex items-center gap-1.5 shrink-0 ${
             saved
               ? 'bg-white/15 text-white hover:bg-white/25 border border-white/20'
@@ -139,18 +191,18 @@ export const AlbumDetailModal: React.FC = () => {
         <div className="flex flex-col items-center text-center space-y-3">
           <div className="relative w-44 h-44 rounded-3xl overflow-hidden shadow-2xl border border-white/10 group">
             <img
-              src={selectedAlbum.coverUrl}
-              alt={selectedAlbum.title}
+              src={liveAlbum.coverUrl}
+              alt={liveAlbum.title}
               className="w-full h-full object-cover"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
           </div>
 
           <div className="space-y-1 max-w-xs">
-            <h1 className="text-xl font-black text-white leading-tight">{selectedAlbum.title}</h1>
-            <p className="text-sm font-semibold opacity-75">{selectedAlbum.artist}</p>
+            <h1 className="text-xl font-black text-white leading-tight">{liveAlbum.title}</h1>
+            <p className="text-sm font-semibold opacity-75">{liveAlbum.artist}</p>
             <div className="text-xs opacity-50 flex items-center justify-center gap-2 pt-1">
-              <span>{selectedAlbum.year || 'Album'}</span>
+              <span>{liveAlbum.year || 'Album'}</span>
               <span>•</span>
               <span>{currentSongs.length} tracks</span>
               {totalMins > 0 && (
@@ -189,7 +241,7 @@ export const AlbumDetailModal: React.FC = () => {
             <span>+ Queue</span>
           </button>
           <button
-            onClick={() => toggleSaveAlbum(selectedAlbum)}
+            onClick={handleToggleSaveWithSongs}
             className={`py-3 px-3 rounded-2xl font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 border ${
               saved
                 ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
@@ -200,7 +252,7 @@ export const AlbumDetailModal: React.FC = () => {
             <span>{saved ? 'Saved' : 'Save'}</span>
           </button>
           {currentSongs.length > 0 && (
-            batchCacheState?.active && batchCacheState.targetId === selectedAlbum.id ? (
+            batchCacheState?.active && batchCacheState.targetId === liveAlbum.id ? (
               <button
                 onClick={cancelBatchCache}
                 className="py-3 px-3 rounded-2xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 border border-amber-500/30"
@@ -211,7 +263,7 @@ export const AlbumDetailModal: React.FC = () => {
               </button>
             ) : currentSongs.some((s) => !isSongCached(s.id)) ? (
               <button
-                onClick={() => cacheSongsBatch(currentSongs, selectedAlbum.id, selectedAlbum.title)}
+                onClick={() => cacheSongsBatch(currentSongs, liveAlbum.id, liveAlbum.title)}
                 disabled={!!batchCacheState?.active}
                 className="py-3 px-3 rounded-2xl bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 border border-cyan-500/30 disabled:opacity-40"
               >
@@ -239,7 +291,7 @@ export const AlbumDetailModal: React.FC = () => {
             >
               <div className="font-black text-sm text-white flex items-center gap-2 pb-2 border-b border-white/10">
                 <ListPlus className="w-4 h-4 text-emerald-400" />
-                <span>Add "{selectedAlbum.title}" to Queue</span>
+                <span>Add "{liveAlbum.title}" to Queue</span>
               </div>
 
               <div className="space-y-2 pt-1">
@@ -306,6 +358,7 @@ export const AlbumDetailModal: React.FC = () => {
                 const liked = isLiked(song.id);
                 const cached = isSongCached(song.id);
                 const isCaching = isSongCaching(song.id);
+                const isCurrent = isSameSong(currentSong, song);
                 return (
                   <SwipeableSongRow key={song.id} song={song}>
                     <div
@@ -313,15 +366,25 @@ export const AlbumDetailModal: React.FC = () => {
                         hapticFeedback();
                         playSong(song, currentSongs);
                       }}
-                      className="flex items-center justify-between p-2.5 rounded-2xl bg-white/5 hover:bg-white/10 transition border border-white/5 cursor-pointer group active:scale-[0.99]"
+                      className={`flex items-center justify-between p-2.5 rounded-2xl transition border cursor-pointer group active:scale-[0.99] ${
+                        isCurrent
+                          ? 'bg-white/10 border-white/15'
+                          : 'bg-white/5 hover:bg-white/10 border-white/5'
+                      }`}
                     >
                       <div className="flex items-center gap-3 min-w-0 flex-1">
-                        <span className="text-xs font-mono font-bold w-4 text-center opacity-40">
-                          {idx + 1}
-                        </span>
+                        <div className="w-4 flex items-center justify-center shrink-0">
+                          {isCurrent ? (
+                            <PlayingBars accentColor={themeColors.accent} isPlaying={isPlaying} size="sm" />
+                          ) : (
+                            <span className="text-xs font-mono font-bold text-center opacity-40">
+                              {idx + 1}
+                            </span>
+                          )}
+                        </div>
                         <div className="relative w-11 h-11 rounded-xl overflow-hidden shrink-0 shadow-md">
                           <img
-                            src={getSongCoverUrl(song) || selectedAlbum.coverUrl}
+                            src={getSongCoverUrl(song) || liveAlbum.coverUrl}
                             alt={song.title}
                             className="w-full h-full object-cover"
                           />
@@ -331,7 +394,12 @@ export const AlbumDetailModal: React.FC = () => {
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-1.5">
-                            <div className="text-sm font-semibold truncate leading-tight text-white">
+                            <div
+                              className={`text-sm truncate leading-tight ${
+                                isCurrent ? 'font-bold' : 'font-semibold text-white'
+                              }`}
+                              style={{ color: isCurrent ? themeColors.accent : undefined }}
+                            >
                               {song.title}
                             </div>
                             {cached && (
@@ -390,7 +458,11 @@ export const AlbumDetailModal: React.FC = () => {
           ) : (
             <div className="p-8 text-center text-xs opacity-50 bg-white/5 rounded-2xl flex flex-col items-center">
               <Disc className="w-8 h-8 mb-2 opacity-30" />
-              <span>No tracks found for this album.</span>
+              <span>
+                {typeof navigator !== 'undefined' && !navigator.onLine
+                  ? 'You are offline and this album tracklist has not been cached yet.'
+                  : 'No tracks found for this album.'}
+              </span>
             </div>
           )}
         </div>

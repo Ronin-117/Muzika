@@ -38,3 +38,17 @@
     transform: rotate(360deg);
   }
 }
+
+@keyframes muzika-eq-bounce {
+  0%, 100% {
+    transform: scaleY(0.32);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+.muzika-eq-bar {
+  transform-origin: bottom;
+  animation: muzika-eq-bounce 0.8s ease-in-out infinite;
+}

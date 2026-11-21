@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { useMusic } from '../../context/MusicContext';
 import { ArrowLeft, Play, Users, Heart, UserPlus, Check, Loader2, Music } from 'lucide-react';
 import { OnlineMusicService } from '../../services/onlineMusicService';
+import { riplaySyncStore } from '../../services/riplaySyncStore';
 import { Song } from '../../types/music';
 import { SwipeableSongRow } from '../common/SwipeableSongRow';
+import { PlayingBars, isSameSong } from '../common/PlayingBars';
 
 export const ArtistDetailModal: React.FC = () => {
   const {
@@ -11,6 +13,8 @@ export const ArtistDetailModal: React.FC = () => {
     setSelectedArtistId,
     selectedArtist,
     setSelectedArtist,
+    currentSong,
+    isPlaying,
     playSong,
     themeColors,
     toggleLike,
@@ -20,16 +24,19 @@ export const ArtistDetailModal: React.FC = () => {
     savedArtists,
     toggleFollowArtist,
     isArtistFollowed,
+    updateArtistTracks,
+    getSongCoverUrl,
   } = useMusic();
 
   const [topSongs, setTopSongs] = useState<Song[]>([]);
   const [isLoadingSongs, setIsLoadingSongs] = useState(false);
 
-  // Determine artist entity from context or storage
+  // Determine freshest artist entity from saved/imported store or selection
+  const targetId = selectedArtist?.id || selectedArtistId;
   const artist =
-    selectedArtist ||
-    savedArtists.find((a) => a.id === selectedArtistId) ||
-    importedArtists.find((a) => a.id === selectedArtistId);
+    (targetId ? savedArtists.find((a) => a.id === targetId) : undefined) ||
+    (targetId ? importedArtists.find((a) => a.id === targetId) : undefined) ||
+    selectedArtist;
 
   useEffect(() => {
     if (!artist) {
@@ -40,22 +47,68 @@ export const ArtistDetailModal: React.FC = () => {
     if (artist.topSongs && artist.topSongs.length > 0) {
       setTopSongs(artist.topSongs);
       setIsLoadingSongs(false);
+      // Mirror to IndexedDB so it stays available offline across sessions
+      riplaySyncStore
+        .saveArtistTracks(artist.id, {
+          topSongs: artist.topSongs,
+          bannerUrl: artist.bannerUrl,
+          subscribers: artist.subscribers,
+          bio: artist.bio,
+        })
+        .catch(() => {});
       return;
     }
 
-    // If top songs list is empty, fetch verified songs dynamically from YouTube Music
     let isMounted = true;
     setIsLoadingSongs(true);
-    OnlineMusicService.fetchArtistTopSongs(artist.id)
-      .then((data) => {
+
+    (async () => {
+      try {
+        // 1. Check durable IndexedDB tracklist cache first (works 100% offline!)
+        const cached = await riplaySyncStore.getArtistTracks(artist.id);
+        if (cached?.topSongs && cached.topSongs.length > 0) {
+          if (isMounted) {
+            setTopSongs(cached.topSongs);
+            setIsLoadingSongs(false);
+            updateArtistTracks(artist.id, cached.topSongs, {
+              bannerUrl: cached.bannerUrl,
+              subscribers: cached.subscribers,
+              bio: cached.bio,
+            });
+          }
+          return;
+        }
+
+        // 2. If offline and not yet cached, don't hang waiting for network
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          if (isMounted) setIsLoadingSongs(false);
+          return;
+        }
+
+        // 3. Fetch verified songs from YouTube Music & persist them immediately
+        const data = await OnlineMusicService.fetchArtistTopSongs(artist.id);
+        const fetched = data?.topSongs || [];
         if (isMounted) {
-          setTopSongs(data.topSongs || []);
+          setTopSongs(fetched);
           setIsLoadingSongs(false);
         }
-      })
-      .catch(() => {
+        if (fetched.length > 0) {
+          await riplaySyncStore.saveArtistTracks(artist.id, {
+            topSongs: fetched,
+            bannerUrl: data.bannerUrl || artist.bannerUrl,
+            subscribers: artist.subscribers,
+            bio: artist.bio,
+          });
+          updateArtistTracks(artist.id, fetched, {
+            bannerUrl: data.bannerUrl || artist.bannerUrl,
+            subscribers: artist.subscribers,
+            bio: artist.bio,
+          });
+        }
+      } catch {
         if (isMounted) setIsLoadingSongs(false);
-      });
+      }
+    })();
 
     return () => {
       isMounted = false;
@@ -65,12 +118,21 @@ export const ArtistDetailModal: React.FC = () => {
   if (!selectedArtistId && !selectedArtist) return null;
   if (!artist) return null;
 
+  const currentTopSongs =
+    topSongs.length > 0 ? topSongs : artist.topSongs || [];
   const isFollowed = isArtistFollowed(artist.id);
 
   const handleBack = () => {
     hapticFeedback();
     setSelectedArtistId(null);
     setSelectedArtist(null);
+  };
+
+  const handleToggleFollowWithSongs = () => {
+    toggleFollowArtist({
+      ...artist,
+      topSongs: currentTopSongs,
+    });
   };
 
   return (
@@ -92,7 +154,7 @@ export const ArtistDetailModal: React.FC = () => {
         </div>
 
         <button
-          onClick={() => toggleFollowArtist(artist)}
+          onClick={handleToggleFollowWithSongs}
           className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition flex items-center gap-1.5 shrink-0 ${
             isFollowed
               ? 'bg-white/15 text-white hover:bg-white/25 border border-white/20'
@@ -155,11 +217,11 @@ export const ArtistDetailModal: React.FC = () => {
         <section className="space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-bold">Popular Songs</h2>
-            {topSongs.length > 0 && (
+            {currentTopSongs.length > 0 && (
               <button
                 onClick={() => {
                   hapticFeedback();
-                  playSong(topSongs[0], topSongs);
+                  playSong(currentTopSongs[0], currentTopSongs);
                 }}
                 className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold text-white shadow-md active:scale-95 transition"
                 style={{ backgroundColor: themeColors.accent }}
@@ -174,29 +236,45 @@ export const ArtistDetailModal: React.FC = () => {
               <Loader2 className="w-6 h-6 animate-spin text-purple-400" />
               <span>Loading top songs from YouTube Music...</span>
             </div>
-          ) : topSongs.length > 0 ? (
+          ) : currentTopSongs.length > 0 ? (
             <div className="space-y-1.5">
-              {topSongs.map((song, idx) => {
+              {currentTopSongs.map((song, idx) => {
                 const liked = isLiked(song.id);
+                const isCurrent = isSameSong(currentSong, song);
                 return (
                   <SwipeableSongRow key={song.id} song={song}>
                     <div
                       onClick={() => {
                         hapticFeedback();
-                        playSong(song, topSongs);
+                        playSong(song, currentTopSongs);
                       }}
-                      className="flex items-center justify-between p-2.5 rounded-2xl bg-white/5 hover:bg-white/10 transition cursor-pointer group active:scale-[0.99]"
+                      className={`flex items-center justify-between p-2.5 rounded-2xl transition cursor-pointer group active:scale-[0.99] ${
+                        isCurrent ? 'bg-white/10' : 'bg-white/5 hover:bg-white/10'
+                      }`}
                     >
                       <div className="flex items-center gap-3 min-w-0 flex-1">
-                        <span className="text-xs font-mono opacity-40 w-4 text-center">{idx + 1}</span>
+                        <div className="w-4 flex items-center justify-center shrink-0">
+                          {isCurrent ? (
+                            <PlayingBars accentColor={themeColors.accent} isPlaying={isPlaying} size="sm" />
+                          ) : (
+                            <span className="text-xs font-mono opacity-40 text-center">{idx + 1}</span>
+                          )}
+                        </div>
                         <div className="relative w-10 h-10 rounded-lg overflow-hidden shrink-0 shadow">
-                          <img src={song.thumbnailUrl} alt={song.title} className="w-full h-full object-cover" />
+                          <img src={getSongCoverUrl(song)} alt={song.title} className="w-full h-full object-cover" />
                           <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
                             <Play className="w-4 h-4 fill-white" />
                           </div>
                         </div>
                         <div className="min-w-0 flex-1">
-                          <div className="text-sm font-semibold truncate leading-tight text-white">{song.title}</div>
+                          <div
+                            className={`text-sm truncate leading-tight ${
+                              isCurrent ? 'font-bold' : 'font-semibold text-white'
+                            }`}
+                            style={{ color: isCurrent ? themeColors.accent : undefined }}
+                          >
+                            {song.title}
+                          </div>
                           <div className="text-xs opacity-60 truncate mt-0.5">{song.album || artist.name}</div>
                         </div>
                       </div>
@@ -221,7 +299,11 @@ export const ArtistDetailModal: React.FC = () => {
           ) : (
             <div className="p-8 text-center text-xs opacity-50 bg-white/5 rounded-2xl flex flex-col items-center">
               <Music className="w-8 h-8 mb-2 opacity-30" />
-              <span>No songs available for this artist yet.</span>
+              <span>
+                {typeof navigator !== 'undefined' && !navigator.onLine
+                  ? 'You are offline and this artist tracklist has not been cached yet.'
+                  : 'No songs available for this artist yet.'}
+              </span>
             </div>
           )}
         </section>

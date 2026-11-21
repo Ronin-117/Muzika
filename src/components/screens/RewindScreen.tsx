@@ -2,9 +2,11 @@ import React from 'react';
 import { useMusic } from '../../context/MusicContext';
 import { Trophy, Clock, PlayCircle, Award, Sparkles, Flame, Play, Music } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { SwipeableSongRow } from '../common/SwipeableSongRow';
+import { PlayingBars, isSameSong } from '../common/PlayingBars';
 
 export const RewindScreen: React.FC = () => {
-  const { userStats, themeColors, playSong, hapticFeedback, likedSongs, history } = useMusic();
+  const { userStats, themeColors, currentSong, isPlaying, playSong, hapticFeedback, likedSongs, history, getSongCoverUrl } = useMusic();
 
   const handleCelebrate = () => {
     hapticFeedback();
@@ -131,27 +133,47 @@ export const RewindScreen: React.FC = () => {
           </div>
 
           <div className="space-y-1.5">
-            {heavyRotationTracks.map((song) => (
-              <div
-                key={song.id}
-                onClick={() => {
-                  hapticFeedback();
-                  playSong(song, heavyRotationTracks);
-                }}
-                className="flex items-center justify-between p-2.5 rounded-2xl bg-white/5 hover:bg-white/10 transition cursor-pointer"
-              >
-                <div className="flex items-center gap-3 min-w-0 flex-1">
-                  <div className="w-10 h-10 rounded-lg overflow-hidden shrink-0">
-                    <img src={song.thumbnailUrl} alt={song.title} className="w-full h-full object-cover" />
+            {heavyRotationTracks.map((song) => {
+              const isCurrent = isSameSong(currentSong, song);
+              return (
+                <SwipeableSongRow key={song.id} song={song}>
+                  <div
+                    onClick={() => {
+                      hapticFeedback();
+                      playSong(song, heavyRotationTracks);
+                    }}
+                    className={`flex items-center justify-between p-2.5 rounded-2xl transition cursor-pointer ${
+                      isCurrent ? 'bg-white/10' : 'bg-white/5 hover:bg-white/10'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <div className="relative w-10 h-10 rounded-lg overflow-hidden shrink-0">
+                        <img src={getSongCoverUrl(song)} alt={song.title} className="w-full h-full object-cover" />
+                        {isCurrent && (
+                          <div className="absolute inset-0 bg-black/55 flex items-center justify-center">
+                            <PlayingBars accentColor={themeColors.accent} isPlaying={isPlaying} size="sm" />
+                          </div>
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div
+                          className={`text-xs truncate leading-tight ${isCurrent ? 'font-extrabold' : 'font-bold'}`}
+                          style={{ color: isCurrent ? themeColors.accent : undefined }}
+                        >
+                          {song.title}
+                        </div>
+                        <div className="text-[11px] opacity-60 truncate">{song.artist}</div>
+                      </div>
+                    </div>
+                    {isCurrent ? (
+                      <PlayingBars accentColor={themeColors.accent} isPlaying={isPlaying} size="sm" />
+                    ) : (
+                      <Play className="w-4 h-4 opacity-40 shrink-0" />
+                    )}
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-xs font-bold truncate leading-tight">{song.title}</div>
-                    <div className="text-[11px] opacity-60 truncate">{song.artist}</div>
-                  </div>
-                </div>
-                <Play className="w-4 h-4 opacity-40 shrink-0" />
-              </div>
-            ))}
+                </SwipeableSongRow>
+              );
+            })}
           </div>
         </section>
       )}

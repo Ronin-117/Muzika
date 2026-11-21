@@ -16,9 +16,13 @@ import {
 } from 'lucide-react';
 import { Song } from '../../types/music';
 import { OnlineMusicService } from '../../services/onlineMusicService';
+import { SwipeableSongRow } from '../common/SwipeableSongRow';
+import { PlayingBars, isSameSong } from '../common/PlayingBars';
 
 export const ExploreScreen: React.FC = () => {
   const {
+    currentSong,
+    isPlaying,
     playSong,
     playlists,
     setSelectedPlaylist,
@@ -147,42 +151,58 @@ export const ExploreScreen: React.FC = () => {
               const cached = isSongCached(song.id);
               const liked = isLiked(song.id);
               const isCaching = cachingId === song.id || isSongCaching(song.id);
+              const isCurrent = isSameSong(currentSong, song);
 
               return (
-                <div
-                  key={song.id}
-                  onClick={() => {
-                    hapticFeedback();
-                    playSong(song, onlineSongs);
-                  }}
-                  className="flex items-center justify-between p-2.5 rounded-2xl bg-white/5 hover:bg-white/10 transition border border-white/5 cursor-pointer group active:scale-[0.99]"
-                >
-                  <div className="flex items-center gap-3 min-w-0 flex-1">
-                    <span className="text-xs font-bold opacity-40 w-4 text-center">
-                      {idx + 1}
-                    </span>
-                    <div className="relative w-12 h-12 rounded-xl overflow-hidden shrink-0 shadow-md">
-                      <img src={song.thumbnailUrl} alt={song.title} className="w-full h-full object-cover" />
-                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white">
-                        <Play className="w-5 h-5 fill-white" />
-                      </div>
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5">
-                        <div className="text-sm font-semibold truncate leading-tight text-white">
-                          {song.title}
-                        </div>
-                        {cached && (
-                          <span className="shrink-0 flex items-center gap-0.5 text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded">
-                            <CheckCircle2 className="w-2.5 h-2.5" />
+                <SwipeableSongRow key={song.id} song={song}>
+                  <div
+                    onClick={() => {
+                      hapticFeedback();
+                      playSong(song, onlineSongs);
+                    }}
+                    className={`flex items-center justify-between p-2.5 rounded-2xl transition border cursor-pointer group active:scale-[0.99] ${
+                      isCurrent
+                        ? 'bg-white/10 border-white/15'
+                        : 'bg-white/5 hover:bg-white/10 border-white/5'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <div className="w-4 flex items-center justify-center shrink-0">
+                        {isCurrent ? (
+                          <PlayingBars accentColor={themeColors.accent} isPlaying={isPlaying} size="sm" />
+                        ) : (
+                          <span className="text-xs font-bold opacity-40 text-center">
+                            {idx + 1}
                           </span>
                         )}
                       </div>
-                      <div className="text-xs opacity-60 truncate mt-0.5">
-                        {song.artist} {song.genre ? `• ${song.genre}` : ''}
+                      <div className="relative w-12 h-12 rounded-xl overflow-hidden shrink-0 shadow-md">
+                        <img src={song.thumbnailUrl} alt={song.title} className="w-full h-full object-cover" />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white">
+                          <Play className="w-5 h-5 fill-white" />
+                        </div>
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <div
+                            className={`text-sm truncate leading-tight ${
+                              isCurrent ? 'font-bold' : 'font-semibold text-white'
+                            }`}
+                            style={{ color: isCurrent ? themeColors.accent : undefined }}
+                          >
+                            {song.title}
+                          </div>
+                          {cached && (
+                            <span className="shrink-0 flex items-center gap-0.5 text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded">
+                              <CheckCircle2 className="w-2.5 h-2.5" />
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs opacity-60 truncate mt-0.5">
+                          {song.artist} {song.genre ? `• ${song.genre}` : ''}
+                        </div>
                       </div>
                     </div>
-                  </div>
 
                   <div className="flex items-center gap-1 shrink-0 ml-2">
                     {/* Cache */}
@@ -230,11 +250,12 @@ export const ExploreScreen: React.FC = () => {
                       <MoreVertical className="w-4 h-4" />
                     </button>
 
-                    <span className="text-xs font-mono opacity-40 ml-1 min-w-[32px] text-right">
-                      {Math.floor(song.duration / 60)}:{(song.duration % 60).toString().padStart(2, '0')}
-                    </span>
+                      <span className="text-xs font-mono opacity-40 ml-1 min-w-[32px] text-right">
+                        {Math.floor(song.duration / 60)}:{(song.duration % 60).toString().padStart(2, '0')}
+                      </span>
+                    </div>
                   </div>
-                </div>
+                </SwipeableSongRow>
               );
             })}
           </div>

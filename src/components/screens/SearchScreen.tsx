@@ -27,12 +27,15 @@ import {
 import { Song, Artist, Album } from '../../types/music';
 import { OnlineMusicService } from '../../services/onlineMusicService';
 import { SwipeableSongRow } from '../common/SwipeableSongRow';
+import { PlayingBars, isSameSong } from '../common/PlayingBars';
 
 const INITIAL_VISIBLE_SONGS = 30;
 const INITIAL_VISIBLE_ALBUMS = 12;
 
 export const SearchScreen: React.FC = () => {
   const {
+    currentSong,
+    isPlaying,
     playSong,
     setSelectedArtistId,
     setSelectedArtist,
@@ -585,6 +588,7 @@ export const SearchScreen: React.FC = () => {
                   const cached = isSongCached(song.id);
                   const liked = isLiked(song.id);
                   const isCaching = cachingSongId === song.id || isSongCaching(song.id);
+                  const isCurrent = isSameSong(currentSong, song);
 
                   return (
                     <SwipeableSongRow key={song.id} song={song}>
@@ -593,7 +597,11 @@ export const SearchScreen: React.FC = () => {
                           hapticFeedback();
                           playSong(song, combinedSongs);
                         }}
-                        className="flex items-center justify-between p-2.5 rounded-2xl bg-white/5 hover:bg-white/10 transition border border-white/5 cursor-pointer group active:scale-[0.99]"
+                        className={`flex items-center justify-between p-2.5 rounded-2xl transition border cursor-pointer group active:scale-[0.99] ${
+                          isCurrent
+                            ? 'bg-white/10 border-white/15'
+                            : 'bg-white/5 hover:bg-white/10 border-white/5'
+                        }`}
                       >
                         <div className="flex items-center gap-3 min-w-0 flex-1">
                           <div className="relative w-12 h-12 rounded-xl overflow-hidden shrink-0 shadow-md">
@@ -604,14 +612,27 @@ export const SearchScreen: React.FC = () => {
                               decoding="async"
                               className="w-full h-full object-cover group-hover:scale-105 transition"
                             />
-                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition text-white">
-                              <Play className="w-5 h-5 fill-white" />
+                            <div
+                              className={`absolute inset-0 flex items-center justify-center transition text-white ${
+                                isCurrent ? 'bg-black/55 opacity-100' : 'bg-black/40 opacity-0 group-hover:opacity-100'
+                              }`}
+                            >
+                              {isCurrent ? (
+                                <PlayingBars accentColor={themeColors.accent} isPlaying={isPlaying} size="md" />
+                              ) : (
+                                <Play className="w-5 h-5 fill-white" />
+                              )}
                             </div>
                           </div>
 
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-1.5">
-                              <div className="text-sm font-semibold truncate leading-tight text-white">
+                              <div
+                                className={`text-sm truncate leading-tight ${
+                                  isCurrent ? 'font-bold' : 'font-semibold text-white'
+                                }`}
+                                style={{ color: isCurrent ? themeColors.accent : undefined }}
+                              >
                                 {song.title}
                               </div>
                               {cached && (

@@ -1,7 +1,8 @@
-import React, { useState, useRef, memo } from 'react';
+import React, { useState, useRef, useEffect, memo } from 'react';
 import { useMusic } from '../../context/MusicContext';
 import { ListPlus, CornerDownRight, Check } from 'lucide-react';
 import { Song } from '../../types/music';
+import { isSameSong } from './PlayingBars';
 
 interface SwipeableSongRowProps {
   song: Song;
@@ -16,6 +17,8 @@ const FLICK_MIN_DISTANCE = 28;
 const FLICK_MAX_MS = 240;
 const FLICK_MIN_VELOCITY = 0.32;
 const MAX_OFFSET = 114;
+const MOVE_CANCEL_PX = 6;
+const LONG_PRESS_MS = 520;
 
 export const SwipeableSongRow: React.FC<SwipeableSongRowProps> = memo(({
   song,
@@ -24,8 +27,17 @@ export const SwipeableSongRow: React.FC<SwipeableSongRowProps> = memo(({
   className = '',
   disabled = false,
 }) => {
-  const { addToQueue, playNextInQueue, setSongOptionsMenuTarget, hapticFeedback } = useMusic();
+  const {
+    addToQueue,
+    playNextInQueue,
+    setSongOptionsMenuTarget,
+    hapticFeedback,
+    currentSong,
+    themeColors,
+  } = useMusic();
   const [addedMode, setAddedMode] = useState<'next' | 'end' | null>(null);
+
+  const isCurrentlyActive = isSameSong(currentSong, song);
 
   const foregroundRef = useRef<HTMLDivElement | null>(null);
   const bgRef = useRef<HTMLDivElement | null>(null);
@@ -40,16 +52,29 @@ export const SwipeableSongRow: React.FC<SwipeableSongRowProps> = memo(({
   const isHorizontalSwipeRef = useRef<boolean | null>(null);
   const thresholdHapticFiredRef = useRef(false);
   const wasDraggedRef = useRef(false);
+  const touchMovedRef = useRef(false);
   const longPressTimerRef = useRef<number | null>(null);
   const isLongPressRef = useRef<boolean>(false);
   const flashTimerRef = useRef<number | null>(null);
+  const scrollCancelAttachedRef = useRef(false);
 
   const clearLongPressTimer = () => {
     if (longPressTimerRef.current) {
       window.clearTimeout(longPressTimerRef.current);
       longPressTimerRef.current = null;
     }
+    if (scrollCancelAttachedRef.current) {
+      window.removeEventListener('scroll', clearLongPressTimer, true);
+      scrollCancelAttachedRef.current = false;
+    }
   };
+
+  useEffect(() => {
+    return () => {
+      clearLongPressTimer();
+      if (flashTimerRef.current) window.clearTimeout(flashTimerRef.current);
+    };
+  }, []);
 
   const resetVisuals = (animate = true) => {
     dragOffsetRef.current = 0;
@@ -77,7 +102,10 @@ export const SwipeableSongRow: React.FC<SwipeableSongRowProps> = memo(({
   };
 
   const handleTouchStart = (e: React.TouchEvent) => {
-    if (disabled || e.touches.length !== 1) return;
+    if (disabled || e.touches.length !== 1) {
+      clearLongPressTimer();
+      return;
+    }
     const touch = e.touches[0];
     startXRef.current = touch.clientX;
     startYRef.current = touch.clientY;
@@ -86,6 +114,7 @@ export const SwipeableSongRow: React.FC<SwipeableSongRowProps> = memo(({
     isHorizontalSwipeRef.current = null;
     thresholdHapticFiredRef.current = false;
     wasDraggedRef.current = false;
+    touchMovedRef.current = false;
     isLongPressRef.current = false;
     isTrackingRef.current = true;
 
@@ -98,30 +127,49 @@ export const SwipeableSongRow: React.FC<SwipeableSongRowProps> = memo(({
     }
 
     clearLongPressTimer();
+    window.addEventListener('scroll', clearLongPressTimer, { capture: true, passive: true, once: true });
+    scrollCancelAttachedRef.current = true;
+
     longPressTimerRef.current = window.setTimeout(() => {
+      if (touchMovedRef.current || isHorizontalSwipeRef.current !== null) {
+        clearLongPressTimer();
+        return;
+      }
+      clearLongPressTimer();
       isLongPressRef.current = true;
       isTrackingRef.current = false;
       hapticFeedback();
       resetVisuals(true);
       setSongOptionsMenuTarget({ song });
-    }, 450);
+    }, LONG_PRESS_MS);
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    if (disabled || !isTrackingRef.current || e.touches.length !== 1) return;
+    if (disabled) return;
+    if (e.touches.length !== 1) {
+      clearLongPressTimer();
+      isTrackingRef.current = false;
+      return;
+    }
 
     const touch = e.touches[0];
     const deltaX = touch.clientX - startXRef.current;
     const deltaY = touch.clientY - startYRef.current;
 
-    if (Math.abs(deltaX) > 9 || Math.abs(deltaY) > 9) {
+    // Cancel long-press immediately on ANY scroll or swipe movement (> 6px), even after vertical lock
+    if (Math.abs(deltaX) > MOVE_CANCEL_PX || Math.abs(deltaY) > MOVE_CANCEL_PX) {
+      touchMovedRef.current = true;
       clearLongPressTimer();
     }
 
+    if (!isTrackingRef.current) return;
+
     if (isHorizontalSwipeRef.current === null) {
-      if (Math.abs(deltaX) > 6 || Math.abs(deltaY) > 6) {
+      if (Math.abs(deltaX) > MOVE_CANCEL_PX || Math.abs(deltaY) > MOVE_CANCEL_PX) {
         const horizontal = Math.abs(deltaX) >= Math.abs(deltaY) * 0.8;
         isHorizontalSwipeRef.current = horizontal;
+        clearLongPressTimer();
+        touchMovedRef.current = true;
         if (!horizontal) {
           isTrackingRef.current = false;
           resetVisuals(false);
@@ -134,6 +182,8 @@ export const SwipeableSongRow: React.FC<SwipeableSongRowProps> = memo(({
 
     if (isHorizontalSwipeRef.current) {
       wasDraggedRef.current = true;
+      touchMovedRef.current = true;
+      clearLongPressTimer();
       const abs = Math.abs(deltaX);
       const sign = deltaX >= 0 ? 1 : -1;
       const damped = abs <= 86 ? deltaX : sign * (86 + (abs - 86) * 0.3);
@@ -219,21 +269,35 @@ export const SwipeableSongRow: React.FC<SwipeableSongRowProps> = memo(({
   };
 
   const handleClickCapture = (e: React.MouseEvent) => {
-    if (wasDraggedRef.current) {
+    if (wasDraggedRef.current || isLongPressRef.current) {
       e.stopPropagation();
       e.preventDefault();
       wasDraggedRef.current = false;
+      isLongPressRef.current = false;
     }
   };
 
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
+    // Never fire touch-hold contextmenu if user scrolled or swiped
+    if (touchMovedRef.current || wasDraggedRef.current) return;
+    clearLongPressTimer();
     hapticFeedback();
     setSongOptionsMenuTarget({ song });
   };
 
   return (
-    <div className={`relative overflow-hidden rounded-2xl select-none touch-pan-y ${className}`}>
+    <div
+      className={`relative overflow-hidden rounded-2xl select-none touch-pan-y transition-shadow ${className}`}
+      style={
+        isCurrentlyActive
+          ? {
+              boxShadow: `inset 0 0 0 1px ${themeColors.accent}66, 0 0 14px -4px ${themeColors.accent}35`,
+              backgroundColor: `${themeColors.accent}14`,
+            }
+          : undefined
+      }
+    >
       {/* GPU-driven Background Swipe Action Indicator (no React re-renders during drag) */}
       <div
         ref={bgRef}

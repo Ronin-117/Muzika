@@ -23,9 +23,12 @@ import {
 } from 'lucide-react';
 import { Song, Artist, Album } from '../../types/music';
 import { SwipeableSongRow } from '../common/SwipeableSongRow';
+import { PlayingBars, isSameSong } from '../common/PlayingBars';
 
 export const LibraryScreen: React.FC = () => {
   const {
+    currentSong,
+    isPlaying,
     likedSongs,
     playlists,
     history,
@@ -79,19 +82,43 @@ export const LibraryScreen: React.FC = () => {
     setShowCreateModal(false);
   };
 
-  // Combine Saved + Imported Artists
+  // Combine Saved + Imported Artists (prefer non-empty tracklists when both exist)
   const allArtists = useMemo(() => {
     const map = new Map<string, Artist>();
-    savedArtists.forEach((a) => map.set(a.id, a));
-    importedArtists.forEach((a) => map.set(a.id, a));
+    const absorb = (a: Artist) => {
+      const prev = map.get(a.id);
+      if (!prev) {
+        map.set(a.id, a);
+        return;
+      }
+      map.set(a.id, {
+        ...prev,
+        ...a,
+        topSongs: a.topSongs && a.topSongs.length > 0 ? a.topSongs : prev.topSongs,
+      });
+    };
+    savedArtists.forEach(absorb);
+    importedArtists.forEach(absorb);
     return Array.from(map.values());
   }, [savedArtists, importedArtists]);
 
-  // Combine Saved + Imported Albums
+  // Combine Saved + Imported Albums (prefer non-empty tracklists when both exist)
   const allAlbums = useMemo(() => {
     const map = new Map<string, Album>();
-    savedAlbums.forEach((a) => map.set(a.id, a));
-    importedAlbums.forEach((a) => map.set(a.id, a));
+    const absorb = (a: Album) => {
+      const prev = map.get(a.id);
+      if (!prev) {
+        map.set(a.id, a);
+        return;
+      }
+      map.set(a.id, {
+        ...prev,
+        ...a,
+        songs: a.songs && a.songs.length > 0 ? a.songs : prev.songs,
+      });
+    };
+    savedAlbums.forEach(absorb);
+    importedAlbums.forEach(absorb);
     return Array.from(map.values());
   }, [savedAlbums, importedAlbums]);
 
@@ -337,22 +364,42 @@ export const LibraryScreen: React.FC = () => {
                 const song = record.song;
                 const sizeMb = (record.sizeBytes / (1024 * 1024)).toFixed(1);
                 const hasValidAudio = !!(record.audioBlob && record.audioBlob.size > 1000);
+                const isCurrent = isSameSong(currentSong, song);
                 return (
                   <SwipeableSongRow key={song.id} song={song}>
                     <div
                       onClick={() => playSong(song, cachedTracks.map((c) => c.song))}
-                      className="flex items-center justify-between p-2.5 rounded-2xl bg-white/5 hover:bg-white/10 transition border border-emerald-500/10 cursor-pointer group"
+                      className={`flex items-center justify-between p-2.5 rounded-2xl transition border cursor-pointer group ${
+                        isCurrent
+                          ? 'bg-white/10 border-white/15'
+                          : 'bg-white/5 hover:bg-white/10 border-emerald-500/10'
+                      }`}
                     >
                       <div className="flex items-center gap-3 min-w-0 flex-1">
                         <div className="relative w-11 h-11 rounded-xl overflow-hidden shrink-0 shadow-md">
                           <img src={getSongCoverUrl(song)} alt={song.title} className="w-full h-full object-cover" />
-                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
-                            <Play className="w-4 h-4 fill-white text-white" />
+                          <div
+                            className={`absolute inset-0 flex items-center justify-center transition ${
+                              isCurrent ? 'bg-black/55 opacity-100' : 'bg-black/40 opacity-0 group-hover:opacity-100'
+                            }`}
+                          >
+                            {isCurrent ? (
+                              <PlayingBars accentColor={themeColors.accent} isPlaying={isPlaying} size="md" />
+                            ) : (
+                              <Play className="w-4 h-4 fill-white text-white" />
+                            )}
                           </div>
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-1.5">
-                            <div className="text-sm font-semibold truncate leading-tight">{song.title}</div>
+                            <div
+                              className={`text-sm truncate leading-tight ${
+                                isCurrent ? 'font-bold' : 'font-semibold'
+                              }`}
+                              style={{ color: isCurrent ? themeColors.accent : undefined }}
+                            >
+                              {song.title}
+                            </div>
                             {hasValidAudio ? (
                               <span className="shrink-0 flex items-center gap-0.5 text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">
                                 <CheckCircle2 className="w-2.5 h-2.5" /> Offline
@@ -560,25 +607,44 @@ export const LibraryScreen: React.FC = () => {
           </div>
 
           <div className="space-y-1.5">
-            {history.map((song, i) => (
-              <SwipeableSongRow key={`${song.id}-${i}`} song={song}>
-                <div
-                  onClick={() => playSong(song, history)}
-                  className="flex items-center justify-between p-2.5 rounded-2xl bg-white/5 hover:bg-white/10 transition cursor-pointer"
-                >
-                  <div className="flex items-center gap-3 min-w-0 flex-1">
-                    <div className="w-10 h-10 rounded-lg overflow-hidden shrink-0">
-                      <img src={getSongCoverUrl(song)} alt={song.title} className="w-full h-full object-cover" />
+            {history.map((song, i) => {
+              const isCurrent = isSameSong(currentSong, song);
+              return (
+                <SwipeableSongRow key={`${song.id}-${i}`} song={song}>
+                  <div
+                    onClick={() => playSong(song, history)}
+                    className={`flex items-center justify-between p-2.5 rounded-2xl transition cursor-pointer ${
+                      isCurrent ? 'bg-white/10' : 'bg-white/5 hover:bg-white/10'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <div className="relative w-10 h-10 rounded-lg overflow-hidden shrink-0">
+                        <img src={getSongCoverUrl(song)} alt={song.title} className="w-full h-full object-cover" />
+                        {isCurrent && (
+                          <div className="absolute inset-0 bg-black/55 flex items-center justify-center">
+                            <PlayingBars accentColor={themeColors.accent} isPlaying={isPlaying} size="sm" />
+                          </div>
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div
+                          className={`text-sm truncate ${isCurrent ? 'font-bold' : 'font-semibold'}`}
+                          style={{ color: isCurrent ? themeColors.accent : undefined }}
+                        >
+                          {song.title}
+                        </div>
+                        <div className="text-xs opacity-60 truncate">{song.artist}</div>
+                      </div>
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm font-semibold truncate">{song.title}</div>
-                      <div className="text-xs opacity-60 truncate">{song.artist}</div>
-                    </div>
+                    {isCurrent ? (
+                      <PlayingBars accentColor={themeColors.accent} isPlaying={isPlaying} size="sm" />
+                    ) : (
+                      <Play className="w-4 h-4 opacity-40 shrink-0" />
+                    )}
                   </div>
-                  <Play className="w-4 h-4 opacity-40 shrink-0" />
-                </div>
-              </SwipeableSongRow>
-            ))}
+                </SwipeableSongRow>
+              );
+            })}
           </div>
         </section>
       )}

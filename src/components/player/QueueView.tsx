@@ -1,11 +1,13 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { useMusic, useBackHandler } from '../../context/MusicContext';
-import { Trash2, Music2, Play, Volume2, LocateFixed, Layers, Plus, Edit2, Check, X, ChevronDown, MoreVertical } from 'lucide-react';
+import { Trash2, Music2, Play, LocateFixed, Layers, Plus, Edit2, Check, X, ChevronDown, MoreVertical } from 'lucide-react';
+import { PlayingBars } from '../common/PlayingBars';
 
 export const QueueView: React.FC = () => {
   const {
     queue,
     queueIndex,
+    isPlaying,
     playSong,
     removeFromQueue,
     clearQueue,
@@ -165,12 +167,20 @@ export const QueueView: React.FC = () => {
                   ? 'bg-white/15 shadow-lg border-white/25'
                   : 'hover:bg-white/10 bg-white/[0.03] opacity-80 hover:opacity-100 border-white/5'
               }`}
+              style={
+                isCurrent
+                  ? {
+                      boxShadow: `inset 0 0 0 1px ${themeColors.accent}77`,
+                      backgroundColor: `${themeColors.accent}18`,
+                    }
+                  : undefined
+              }
             >
               <div className="flex items-center gap-2.5 min-w-0 flex-1">
                 {/* Track Number / Playing Icon */}
                 <div className="w-5 text-center shrink-0 flex items-center justify-center">
                   {isCurrent ? (
-                    <Volume2 className="w-3.5 h-3.5 animate-pulse" style={{ color: themeColors.accent }} />
+                    <PlayingBars accentColor={themeColors.accent} isPlaying={isPlaying} size="sm" />
                   ) : (
                     <span className="text-[10px] font-mono opacity-40 font-semibold">{idx + 1}</span>
                   )}
@@ -181,10 +191,10 @@ export const QueueView: React.FC = () => {
                   <img src={getSongCoverUrl(song)} alt={song.title} className="w-full h-full object-cover" />
                   {isCurrent && (
                     <div
-                      className="absolute inset-0 bg-black/40 backdrop-blur-[1px] flex items-center justify-center"
+                      className="absolute inset-0 bg-black/45 backdrop-blur-[1px] flex items-center justify-center"
                       style={{ color: themeColors.accent }}
                     >
-                      <Play className="w-3.5 h-3.5 fill-current" />
+                      <PlayingBars accentColor={themeColors.accent} isPlaying={isPlaying} size="md" />
                     </div>
                   )}
                 </div>
