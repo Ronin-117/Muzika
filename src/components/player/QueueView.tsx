@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useMusic, useBackHandler, isQueueScheduleActive } from '../../context/MusicContext';
 import { QueueSchedule } from '../../types/music';
 import { Trash2, Music2, LocateFixed, Layers, Plus, Edit2, Check, X, ChevronDown, MoreVertical, Clock, ArrowLeft, Star } from 'lucide-react';
@@ -325,20 +326,22 @@ export const QueueView: React.FC = () => {
         })}
       </div>
 
-      {/* Multiple Queues Manager Modal - Guaranteed top stacking (z-[100]) */}
-      {isSelectorOpen && (
-        <div
-          className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-xl flex items-center justify-center p-3 sm:p-4 animate-fadeIn"
-          onClick={() => {
-            setIsSelectorOpen(false);
-            setDeletingQueue(null);
-            setSchedulingQueueId(null);
-          }}
-        >
+      {/* Multiple Queues Manager Modal - Portaled to document.body above FullScreenPlayer (z-[120]) */}
+      {isSelectorOpen &&
+        typeof document !== 'undefined' &&
+        createPortal(
           <div
-            className="w-full max-w-md bg-neutral-900 border border-white/15 rounded-3xl p-5 space-y-4 max-h-[82vh] flex flex-col shadow-2xl my-auto"
-            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 z-[120] bg-black/90 backdrop-blur-xl flex items-center justify-center p-3 sm:p-4 animate-fadeIn"
+            onClick={() => {
+              setIsSelectorOpen(false);
+              setDeletingQueue(null);
+              setSchedulingQueueId(null);
+            }}
           >
+            <div
+              className="w-full max-w-md bg-neutral-900 border border-white/15 rounded-3xl p-4 sm:p-5 space-y-3.5 max-h-[84dvh] flex flex-col shadow-2xl my-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
             {schedulingQueue ? (
               /* Queue Timing Schedules Editor */
               <>
@@ -837,9 +840,10 @@ export const QueueView: React.FC = () => {
                 </div>
               </>
             )}
-          </div>
-        </div>
-      )}
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 };

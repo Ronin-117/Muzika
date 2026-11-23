@@ -323,8 +323,30 @@ class OfflineCacheService {
     return this.cachingIds.has(songId);
   }
 
+  clearIntentionallyRemoved(songId: string): void {
+    this.intentionallyRemovedIds.delete(songId);
+  }
+
   getCachedCoverUrl(songId: string): string | undefined {
     return this.coverUrlCache.get(songId);
+  }
+
+  async getCachedCoverBlob(songId: string): Promise<Blob | undefined> {
+    if (!songId) return undefined;
+    try {
+      const db = await this.initDB();
+      return await new Promise<Blob | undefined>((resolve) => {
+        const tx = db.transaction(STORE_SONGS, 'readonly');
+        const req = tx.objectStore(STORE_SONGS).get(songId);
+        req.onsuccess = () => {
+          const rec = req.result as CachedTrackRecord | undefined;
+          resolve(rec?.artworkBlob && rec.artworkBlob.size > 200 ? rec.artworkBlob : undefined);
+        };
+        req.onerror = () => resolve(undefined);
+      });
+    } catch {
+      return undefined;
+    }
   }
 
   private ensureCoverUrl(songId: string, artworkBlob?: Blob): string | undefined {

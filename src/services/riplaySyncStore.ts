@@ -232,6 +232,40 @@ class RiplaySyncStore {
       >('artist_tracks_v1')) || {}
     );
   }
+
+  async rewriteSyncedSong(originalId: string, rewritten: Song): Promise<void> {
+    if (!originalId) return;
+    try {
+      const albumMap = await this.getAllAlbumTracks();
+      let albumChanged = false;
+      for (const [albId, songs] of Object.entries(albumMap)) {
+        if (songs.some((s) => s.id === originalId)) {
+          albumMap[albId] = songs.map((s) => (s.id === originalId ? { ...s, ...rewritten, id: s.id } : s));
+          albumChanged = true;
+        }
+      }
+      if (albumChanged) {
+        await this.putValue('album_tracks_v1', albumMap);
+      }
+
+      const artistMap = await this.getAllArtistTracks();
+      let artistChanged = false;
+      for (const [artId, entry] of Object.entries(artistMap)) {
+        if (entry?.topSongs?.some((s) => s.id === originalId)) {
+          artistMap[artId] = {
+            ...entry,
+            topSongs: entry.topSongs.map((s) => (s.id === originalId ? { ...s, ...rewritten, id: s.id } : s)),
+          };
+          artistChanged = true;
+        }
+      }
+      if (artistChanged) {
+        await this.putValue('artist_tracks_v1', artistMap);
+      }
+    } catch {
+      // ignore IndexedDB update failures
+    }
+  }
 }
 
 export const riplaySyncStore = new RiplaySyncStore();

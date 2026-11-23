@@ -15,7 +15,6 @@ import {
   Repeat1,
   ListMusic,
   Mic2,
-  Video,
   Disc3,
   Sliders,
   Moon,
@@ -47,8 +46,6 @@ export const FullScreenPlayer: React.FC = () => {
     isLiked,
     isPlayerOpen,
     setIsPlayerOpen,
-    playerMode,
-    setPlayerMode,
     setIsEqualizerOpen,
     setIsSleepTimerOpen,
     setIsSongInfoOpen,
@@ -66,7 +63,7 @@ export const FullScreenPlayer: React.FC = () => {
   } = useMusic();
   const { currentTime, duration } = usePlaybackTime();
 
-  const [activeTab, setActiveTab] = useState<'cover' | 'video' | 'lyrics' | 'queue'>('cover');
+  const [activeTab, setActiveTab] = useState<'cover' | 'lyrics' | 'queue'>('cover');
 
   if (!isPlayerOpen || !currentSong) return null;
 
@@ -128,7 +125,7 @@ export const FullScreenPlayer: React.FC = () => {
         </button>
       </div>
 
-      {/* Main Center Area: Swappable Views (Cover / Video / Lyrics / Queue) */}
+      {/* Main Center Area: Swappable Views (Cover / Lyrics / Queue) */}
       <div
         className={`relative z-10 flex-1 flex flex-col min-h-0 ${
           activeTab === 'cover'
@@ -169,24 +166,15 @@ export const FullScreenPlayer: React.FC = () => {
           </div>
         )}
 
-        {activeTab === 'video' && (
-          <div className="w-full max-w-sm h-56 rounded-3xl overflow-hidden bg-black/60 shadow-2xl flex flex-col items-center justify-center my-auto border border-white/10 p-4 text-center">
-            <Video className="w-8 h-8 mb-2 opacity-50" style={{ color: themeColors.accent }} />
-            <div className="text-xs font-bold text-white mb-1">Live YouTube Video Stream</div>
-            <div className="text-[11px] opacity-60">Streaming video directly on your mobile device</div>
-          </div>
-        )}
-
         {activeTab === 'lyrics' && <LyricsView />}
 
         {activeTab === 'queue' && <QueueView />}
       </div>
 
-      {/* View Switcher Chips (Cover, Video, Lyrics, Queue) */}
+      {/* View Switcher Chips (Cover, Lyrics, Queue) */}
       <div className="relative z-10 flex items-center justify-center gap-2 py-1.5 px-4">
         {[
           { id: 'cover', label: 'Vinyl', icon: Disc3 },
-          { id: 'video', label: 'Video', icon: Video },
           { id: 'lyrics', label: 'Lyrics', icon: Mic2 },
           { id: 'queue', label: 'Queue', icon: ListMusic },
         ].map(({ id, label, icon: Icon }) => {
@@ -196,12 +184,7 @@ export const FullScreenPlayer: React.FC = () => {
               key={id}
               onClick={() => {
                 hapticFeedback();
-                setActiveTab(id as any);
-                if (id === 'video') {
-                  setPlayerMode('video');
-                } else {
-                  setPlayerMode('audio');
-                }
+                setActiveTab(id as 'cover' | 'lyrics' | 'queue');
               }}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition ${
                 isActive

@@ -91,8 +91,8 @@ interface MusicContextType {
   isShuffle: boolean;
   queue: Song[];
   queueIndex: number;
-  playerMode: 'audio' | 'video' | 'lyrics';
-  setPlayerMode: (mode: 'audio' | 'video' | 'lyrics') => void;
+  playerMode: 'audio' | 'lyrics';
+  setPlayerMode: (mode: 'audio' | 'lyrics') => void;
 
   // Modals & Sheets
   isPlayerOpen: boolean;
@@ -339,7 +339,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const isRiplayImportingRef = useRef<boolean>(false);
   const isRiplayExportingRef = useRef<boolean>(false);
   const [isExitConfirmOpen, setIsExitConfirmOpenState] = useState(false);
-  const [playerMode, setPlayerMode] = useState<'audio' | 'video' | 'lyrics'>('audio');
+  const [playerMode, setPlayerMode] = useState<'audio' | 'lyrics'>('audio');
 
   const [selectedPlaylist, setSelectedPlaylistState] = useState<Playlist | null>(null);
   const [selectedArtistId, setSelectedArtistIdState] = useState<string | null>(null);
@@ -1957,24 +1957,195 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   }, []);
 
   // 2. Update MediaMetadata ONLY when the track itself changes (prevents notification flicker/reset on pause)
+  // Also preloads & normalizes artwork to an inline 384x384 JPEG data URL (with proxy + retry) so Android notification
+  // & lockscreen players never get stuck on Chrome/Muzika placeholders when covers load slowly or from blob/CORS sources.
   useEffect(() => {
-    if (typeof window === 'undefined' || !('mediaSession' in navigator)) return;
+    if (typeof window === 'undefined') return;
     if (currentSong) {
-      const coverSrc = offlineCacheService.getCachedCoverUrl(currentSong.id) || currentSong.thumbnailUrl;
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: currentSong.title,
-        artist: currentSong.artist,
-        album: currentSong.album || 'Muzika',
-        artwork: [
-          { src: coverSrc, sizes: '96x96', type: 'image/jpeg' },
-          { src: coverSrc, sizes: '192x192', type: 'image/jpeg' },
-          { src: coverSrc, sizes: '512x512', type: 'image/jpeg' },
-        ],
-      });
+      document.title = `${currentSong.title} • ${currentSong.artist} — Muzika`;
     } else {
-      navigator.mediaSession.metadata = null;
+      document.title = 'Muzika - Music Player';
     }
-  }, [currentSong?.id, currentSong?.thumbnailUrl, currentSong?.title, currentSong?.artist, currentSong?.album]);
+
+    if (!('mediaSession' in navigator)) return;
+    if (!currentSong) {
+      navigator.mediaSession.metadata = null;
+      return;
+    }
+
+    const ytId =
+      currentSong.youtubeId ||
+      (currentSong.id.startsWith('yt-') ? currentSong.id.replace('yt-', '') : '');
+    const candidates: string[] = [];
+    if (currentSong.thumbnailUrl && currentSong.thumbnailUrl.startsWith('http')) {
+      candidates.push(currentSong.thumbnailUrl);
+    }
+    if (ytId && !ytId.startsWith('online-') && !ytId.startsWith('local-')) {
+      const hq = `https://i.ytimg.com/vi/${ytId}/hqdefault.jpg`;
+      const mq = `https://i.ytimg.com/vi/${ytId}/mqdefault.jpg`;
+      if (!candidates.includes(hq)) candidates.push(hq);
+      if (!candidates.includes(mq)) candidates.push(mq);
+    }
+
+    const cacheKey = `${currentSong.id}::${candidates[0] || ''}`;
+    const cacheMap: Map<string, string> =
+      (window as any).__muzikaMediaArtworkCache ||
+      ((window as any).__muzikaMediaArtworkCache = new Map<string, string>());
+
+    const applyMetadata = (artworkList: MediaImage[]) => {
+      try {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: currentSong.title,
+          artist: currentSong.artist,
+          album: currentSong.album || 'Muzika',
+          artwork: artworkList,
+        });
+      } catch {}
+    };
+
+    const cachedDataUrl = cacheMap.get(cacheKey);
+    if (cachedDataUrl) {
+      applyMetadata([
+        { src: cachedDataUrl, sizes: '384x384', type: 'image/jpeg' },
+        { src: cachedDataUrl, sizes: '512x512', type: 'image/jpeg' },
+      ]);
+      return;
+    }
+
+    // Immediate HTTP(S) pass (omit `type` so browser never rejects WebP/PNG labeled as JPEG; avoid blob: URLs)
+    if (candidates.length > 0) {
+      applyMetadata(
+        candidates.slice(0, 2).map((src) => ({ src, sizes: '512x512' }))
+      );
+    } else {
+      applyMetadata([]);
+    }
+
+    let cancelled = false;
+
+    const blobToJpegDataUrl = async (blob: Blob): Promise<string | null> => {
+      if (!blob || blob.size < 200) return null;
+      return new Promise((resolve) => {
+        const objUrl = URL.createObjectURL(blob);
+        const img = new Image();
+        img.onload = () => {
+          try {
+            const size = 384;
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+              const iw = img.naturalWidth || size;
+              const ih = img.naturalHeight || size;
+              const minSide = Math.min(iw, ih);
+              const sx = Math.max(0, (iw - minSide) / 2);
+              const sy = Math.max(0, (ih - minSide) / 2);
+              ctx.drawImage(img, sx, sy, minSide, minSide, 0, 0, size, size);
+              const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+              URL.revokeObjectURL(objUrl);
+              resolve(dataUrl);
+              return;
+            }
+          } catch {}
+          URL.revokeObjectURL(objUrl);
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(typeof reader.result === 'string' ? reader.result : null);
+          reader.onerror = () => resolve(null);
+          reader.readAsDataURL(blob);
+        };
+        img.onerror = () => {
+          URL.revokeObjectURL(objUrl);
+          resolve(null);
+        };
+        img.src = objUrl;
+      });
+    };
+
+    const fetchUrlAsBlob = async (imgUrl: string): Promise<Blob | null> => {
+      // 1. Direct CORS fetch
+      try {
+        const ctrl = new AbortController();
+        const t = window.setTimeout(() => ctrl.abort(), 5000);
+        try {
+          const resp = await fetch(imgUrl, { mode: 'cors', signal: ctrl.signal });
+          if (resp.ok) {
+            const b = await resp.blob();
+            if (b.size > 200) return b;
+          }
+        } finally {
+          window.clearTimeout(t);
+        }
+      } catch {}
+
+      // 2. Fallback to same-origin cover proxy if direct CORS was blocked
+      if (typeof navigator === 'undefined' || navigator.onLine) {
+        try {
+          const ctrl = new AbortController();
+          const t = window.setTimeout(() => ctrl.abort(), 7000);
+          try {
+            const resp = await fetch(`/api/cover-proxy?url=${encodeURIComponent(imgUrl)}`, {
+              signal: ctrl.signal,
+            });
+            if (resp.ok) {
+              const b = await resp.blob();
+              if (b.size > 200) return b;
+            }
+          } finally {
+            window.clearTimeout(t);
+          }
+        } catch {}
+      }
+      return null;
+    };
+
+    (async () => {
+      let resolvedDataUrl: string | null = null;
+
+      // 1. Offline/cached artwork blob from IndexedDB first (works 100% offline & avoids blob: URL IPC rejection)
+      const cachedBlob = await offlineCacheService.getCachedCoverBlob(currentSong.id);
+      if (cancelled) return;
+      if (cachedBlob) {
+        resolvedDataUrl = await blobToJpegDataUrl(cachedBlob);
+      }
+
+      // 2. Online HTTP(S) cover candidates with retry for slow initial loads
+      if (!resolvedDataUrl && (typeof navigator === 'undefined' || navigator.onLine)) {
+        for (let pass = 0; pass < 2 && !resolvedDataUrl && !cancelled; pass++) {
+          if (pass === 1) {
+            await new Promise((r) => setTimeout(r, 900));
+            if (cancelled) return;
+          }
+          for (const url of candidates) {
+            if (cancelled) return;
+            const blob = await fetchUrlAsBlob(url);
+            if (cancelled) return;
+            if (blob) {
+              resolvedDataUrl = await blobToJpegDataUrl(blob);
+              if (resolvedDataUrl) break;
+            }
+          }
+        }
+      }
+
+      if (cancelled || !resolvedDataUrl) return;
+
+      if (cacheMap.size >= 35) {
+        const oldestKey = cacheMap.keys().next().value;
+        if (oldestKey) cacheMap.delete(oldestKey);
+      }
+      cacheMap.set(cacheKey, resolvedDataUrl);
+
+      applyMetadata([
+        { src: resolvedDataUrl, sizes: '384x384', type: 'image/jpeg' },
+        { src: resolvedDataUrl, sizes: '512x512', type: 'image/jpeg' },
+      ]);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentSong?.id, currentSong?.thumbnailUrl, currentSong?.title, currentSong?.artist, currentSong?.album, currentSong?.youtubeId]);
 
   // 3. Keep MediaSession playbackState synchronized cleanly
   useEffect(() => {
@@ -2376,7 +2547,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   };
   playIndexRef.current = playIndex;
 
-  const playSong = (song: Song, customQueue?: Song[]) => {
+  const playSong = (rawSong: Song, customQueue?: Song[]) => {
     hapticFeedback();
     clearInterruptionState();
     sessionStoppedRef.current = false;
@@ -2386,21 +2557,22 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       webAudioEqualizer.ensureActive(htmlAudioRef.current, equalizerSettingsRef.current);
     }
 
+    const song = StorageService.applySongSyncOverride(rawSong);
     let newQueue: Song[];
     let targetIndex: number;
 
     if (customQueue && customQueue.length > 0) {
-      newQueue = customQueue;
-      targetIndex = customQueue.findIndex((s) => s.id === song.id);
+      newQueue = customQueue.map((s) => (s.id === song.id ? song : StorageService.applySongSyncOverride(s)));
+      targetIndex = newQueue.findIndex((s) => s.id === song.id);
       if (targetIndex === -1) {
-        newQueue = [song, ...customQueue];
+        newQueue = [song, ...newQueue];
         targetIndex = 0;
       }
     } else {
       const currentQ = queueRef.current;
       const existingIdx = currentQ.findIndex((s) => s.id === song.id);
       if (existingIdx !== -1) {
-        newQueue = currentQ;
+        newQueue = currentQ.map((s) => (s.id === song.id ? song : s));
         targetIndex = existingIdx;
       } else {
         newQueue = [song, ...currentQ];
@@ -3609,6 +3781,11 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     hapticFeedback();
     stopPreviewCandidate();
 
+    const matchedYoutubeId =
+      matchedSong.source === 'stream'
+        ? undefined
+        : matchedSong.youtubeId || (matchedSong.id?.startsWith('yt-') ? matchedSong.id.replace('yt-', '') : undefined);
+
     const rewritten: Song = {
       ...originalSong,
       title: matchedSong.title || originalSong.title,
@@ -3617,22 +3794,35 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       duration: matchedSong.duration || originalSong.duration,
       thumbnailUrl: matchedSong.thumbnailUrl || originalSong.thumbnailUrl,
       source: matchedSong.source,
-      youtubeId: matchedSong.youtubeId,
+      youtubeId: matchedYoutubeId,
       // Explicitly reset stale streamUrl unless matched candidate carries an explicit streamUrl
       streamUrl: matchedSong.source === 'stream' ? matchedSong.streamUrl : undefined,
       syncedAt: Date.now(),
     };
+    if (matchedSong.source !== 'stream') {
+      delete rewritten.streamUrl;
+    } else {
+      delete rewritten.youtubeId;
+    }
 
     // 1. Save persistent override so future lookups or re-imports use the fixed version
     StorageService.saveSongSyncOverride(originalSong.id, rewritten);
 
-    // 2. Clear any stale cached audio blob from IndexedDB if cached under old mismatched version
-    if (cachedSongIds.has(originalSong.id)) {
-      await offlineCacheService.removeCachedSong(originalSong.id).catch(() => {});
-    }
+    // 2. Always clear any stale cached audio/cover blob from IndexedDB for this song ID
+    await offlineCacheService.removeCachedSong(originalSong.id).catch(() => {});
+    offlineCacheService.clearIntentionallyRemoved(originalSong.id);
+
+    // Reset saved-track guard so lastPlaybackState immediately persists updated metadata
+    lastSavedSongIdRef.current = null;
 
     const replaceInList = (list: Song[]) =>
-      list.map((s) => (s.id === originalSong.id ? { ...s, ...rewritten, id: s.id } : s));
+      list.map((s) => {
+        if (s.id !== originalSong.id) return s;
+        const next: Song = { ...s, ...rewritten, id: s.id };
+        if (rewritten.source !== 'stream') delete next.streamUrl;
+        else delete next.youtubeId;
+        return next;
+      });
 
     // 3. Rewrite inside Playlists & active SelectedPlaylist
     setPlaylists((prev) => {
@@ -3674,7 +3864,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     setQueuesState(updatedNamedQueues);
     StorageService.saveNamedQueues(updatedNamedQueues);
 
-    // 7. Rewrite inside Imported / Saved Artists & Albums
+    // 7. Rewrite inside Imported / Saved Artists, Albums & IndexedDB Track Cache
     setImportedArtists((prev) => {
       const updated = prev.map((a) => ({ ...a, topSongs: replaceInList(a.topSongs) }));
       StorageService.saveCustomArtists(updated);
@@ -3702,6 +3892,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     setSelectedAlbumState((prev) =>
       prev ? { ...prev, songs: replaceInList(prev.songs) } : null
     );
+    riplaySyncStore.rewriteSyncedSong(originalSong.id, rewritten).catch(() => {});
 
     // 8. Rewrite currentSong if matching
     if (currentSongRef.current?.id === originalSong.id) {

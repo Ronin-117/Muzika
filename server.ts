@@ -610,6 +610,7 @@ app.get('/api/stream', async (req: Request, res: Response) => {
   const vidId = rawId.replace(/^yt-/, '');
   const reqDuration = parseInt(String(req.query.duration || '0'), 10) || 0;
   const forceRefresh = req.query.refresh === '1' || req.query.refresh === 'true';
+  const strictVid = req.query.strictVid === '1' || req.query.strictVid === 'true';
 
   // Set permissive CORS headers for media streaming & range scrubbing
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -640,7 +641,7 @@ app.get('/api/stream', async (req: Request, res: Response) => {
       ? artist
       : '';
   const searchQuery = `${title} ${effectiveArtist}`.trim();
-  const cacheKey = `${vidId || 'noid'}::${searchQuery.toLowerCase()}::${reqDuration}`;
+  const cacheKey = `${vidId || 'noid'}::${strictVid ? 'strict' : 'norm'}::${searchQuery.toLowerCase()}::${reqDuration}`;
 
   if (!searchQuery && !vidId) {
     return res.status(400).json({ error: 'Missing stream parameters (title, artist, or id required)' });
@@ -675,8 +676,8 @@ app.get('/api/stream', async (req: Request, res: Response) => {
       let resolvedUrl: string | null = null;
       let mimeType = 'audio/mp4';
 
-      // 1. Strict 320kbps JioSaavn lookup ONLY when we verify artist+title+duration
-      if (title) {
+      // 1. Strict 320kbps JioSaavn lookup (skip when strictVid=1 targets an explicitly synced YouTube video ID)
+      if (title && !(strictVid && vidId)) {
         const queryVariants = buildStreamSearchQueries(title, effectiveArtist);
         const allowLooseWithoutArtist = !effectiveArtist && !vidId;
 
@@ -1058,6 +1059,47 @@ app.get('/api/sync-candidates', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('Error in /api/sync-candidates:', err?.message || err);
     return res.json({ resolvedMeta: null, candidates: [] });
+  }
+});
+
+// 3c. Lightweight allowlisted Cover Art CORS Proxy for MediaSession notification artwork
+app.get('/api/cover-proxy', async (req: Request, res: Response) => {
+  const rawUrl = String(req.query.url || '').trim();
+  if (!rawUrl) return res.status(400).end();
+
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== 'https:') return res.status(400).end();
+    const host = parsed.hostname.toLowerCase();
+    const allowed =
+      host === 'i.ytimg.com' ||
+      host.endsWith('.ytimg.com') ||
+      host.endsWith('.ggpht.com') ||
+      host.endsWith('.googleusercontent.com') ||
+      host.endsWith('.saavncdn.com') ||
+      host.endsWith('.mzstatic.com') ||
+      host === 'images.unsplash.com' ||
+      host.endsWith('.youtube.com');
+    if (!allowed) return res.status(403).end();
+
+    const imgResp = await fetch(parsed.toString(), {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+      },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!imgResp.ok) return res.status(imgResp.status).end();
+
+    const contentType = imgResp.headers.get('content-type') || 'image/jpeg';
+    if (!contentType.toLowerCase().startsWith('image/')) return res.status(415).end();
+
+    const buf = Buffer.from(await imgResp.arrayBuffer());
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    return res.send(buf);
+  } catch {
+    return res.status(502).end();
   }
 });
 

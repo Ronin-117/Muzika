@@ -52,7 +52,7 @@ function OfflineBanner() {
 }
 
 function MuzikaApp() {
-  const { activeTab, themeColors, isPlayerOpen, playerMode, isRiplayImportOpen, setIsRiplayImportOpen } = useMusic();
+  const { activeTab, themeColors, isRiplayImportOpen, setIsRiplayImportOpen } = useMusic();
   const [hasVisitedSearch, setHasVisitedSearch] = useState(activeTab === 'search');
 
   useEffect(() => {
@@ -113,13 +113,7 @@ function MuzikaApp() {
       <ToastNotification />
 
       {/* Persistent YouTube Iframe Embed Container */}
-      <div
-        className={`transition-all duration-300 ${
-          isPlayerOpen && playerMode === 'video'
-            ? 'fixed top-16 left-1/2 -translate-x-1/2 w-[90vw] max-w-sm h-56 rounded-2xl shadow-2xl z-50 border border-white/20 bg-black overflow-hidden'
-            : 'fixed bottom-0 right-0 w-2 h-2 pointer-events-none opacity-[0.01] overflow-hidden z-0'
-        }`}
-      >
+      <div className="fixed bottom-0 right-0 w-2 h-2 pointer-events-none opacity-[0.01] overflow-hidden z-0">
         <div id="muzika-yt-embed" className="w-full h-full" />
       </div>
 

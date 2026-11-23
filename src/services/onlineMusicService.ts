@@ -285,11 +285,13 @@ export class OnlineMusicService {
     const rawTitle = (song.title || '').trim();
     const cleanTitle = rawTitle.replace(/\([^)]*\)|\[[^\]]*\]/g, '').trim();
     const vidId = song.youtubeId || (song.id.startsWith('yt-') ? song.id.replace('yt-', '') : '');
+    const strictVid = Boolean(song.syncedAt && song.source === 'youtube' && vidId);
 
     // 2. Query full-stack backend /api/stream endpoint with full title (preserving feat.), vidId & duration
     try {
       const refreshParam = forceRefresh ? '&refresh=1' : '';
-      const backendUrl = `/api/stream?title=${encodeURIComponent(rawTitle)}&artist=${encodeURIComponent(song.artist || '')}&id=${encodeURIComponent(vidId)}&duration=${song.duration || 0}&json=true${refreshParam}`;
+      const strictParam = strictVid ? '&strictVid=1' : '';
+      const backendUrl = `/api/stream?title=${encodeURIComponent(rawTitle)}&artist=${encodeURIComponent(song.artist || '')}&id=${encodeURIComponent(vidId)}&duration=${song.duration || 0}&json=true${refreshParam}${strictParam}`;
       const signal = typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal ? AbortSignal.timeout(12000) : undefined;
       const res = await fetch(backendUrl, { signal });
       if (res.ok) {
@@ -303,14 +305,14 @@ export class OnlineMusicService {
       // ignore
     }
 
-    // 3. Client-side verified fallback (only if artist is known or no vidId exists)
+    // 3. Client-side verified fallback (skip when strictVid targets an exact synced YouTube video)
     const isUnknownArtist =
       !song.artist ||
       song.artist.toLowerCase() === 'unknown artist' ||
       song.artist.toLowerCase() === 'unknown' ||
       song.artist.toLowerCase() === 'various artists';
 
-    if (!isUnknownArtist) {
+    if (!isUnknownArtist && !strictVid) {
       try {
         const term = `${cleanTitle} ${song.artist}`.trim();
         const signal = typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal ? AbortSignal.timeout(8000) : undefined;

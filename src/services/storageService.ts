@@ -420,7 +420,7 @@ export class StorageService {
     const overrides = this.getSongSyncOverrides();
     const override = overrides[song.id];
     if (!override) return song;
-    return {
+    const merged: Song = {
       ...song,
       ...override,
       id: song.id,
@@ -428,6 +428,13 @@ export class StorageService {
       playCount: song.playCount ?? override.playCount,
       addedAt: song.addedAt ?? override.addedAt,
     };
+    if (override.source !== 'stream' && !override.streamUrl) {
+      delete merged.streamUrl;
+    }
+    if (override.source === 'stream' && !override.youtubeId) {
+      delete merged.youtubeId;
+    }
+    return merged;
   }
 
   // RiPlay Backup & Restore mechanism (Export & Import JSON)

@@ -62,6 +62,8 @@ export const SyncSongModal: React.FC = () => {
     if (!syncTargetSong) {
       setCandidates([]);
       setResolvedMeta(null);
+      setIsApplyingId(null);
+      stopPreviewCandidate();
       return;
     }
 
@@ -76,6 +78,10 @@ export const SyncSongModal: React.FC = () => {
 
     setQuery(initialQ);
     runSearch(undefined, true);
+
+    return () => {
+      stopPreviewCandidate();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [syncTargetSong?.id]);
 
@@ -102,10 +108,13 @@ export const SyncSongModal: React.FC = () => {
   };
 
   const handleSelectCandidate = async (candidate: Song) => {
+    if (isApplyingId) return;
     setIsApplyingId(candidate.id);
     try {
       await applySongSync(syncTargetSong, candidate, true);
       setSyncTargetSong(null);
+    } catch (err) {
+      console.error('Manual sync select error:', err);
     } finally {
       setIsApplyingId(null);
     }
@@ -267,7 +276,8 @@ export const SyncSongModal: React.FC = () => {
               return (
                 <div
                   key={cand.id}
-                  className={`flex items-center justify-between gap-2.5 p-2.5 rounded-2xl border transition ${
+                  onClick={() => previewSongCandidate(cand)}
+                  className={`flex items-center justify-between gap-2.5 p-2.5 rounded-2xl border transition cursor-pointer ${
                     isPreviewing
                       ? 'bg-white/15 border-emerald-400/50'
                       : 'bg-black/30 hover:bg-white/10 border-white/10'
@@ -304,10 +314,16 @@ export const SyncSongModal: React.FC = () => {
                   </div>
 
                   {/* Test Play & Select Actions */}
-                  <div className="flex items-center gap-1.5 shrink-0">
+                  <div
+                    className="flex items-center gap-1.5 shrink-0"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <button
                       type="button"
-                      onClick={() => previewSongCandidate(cand)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        previewSongCandidate(cand);
+                      }}
                       className={`h-9 px-2.5 rounded-xl text-[11px] font-bold flex items-center gap-1 transition active:scale-95 ${
                         isPreviewing
                           ? 'bg-emerald-500 text-black'
@@ -330,9 +346,12 @@ export const SyncSongModal: React.FC = () => {
 
                     <button
                       type="button"
-                      disabled={isApplying}
-                      onClick={() => handleSelectCandidate(cand)}
-                      className="h-9 px-3 rounded-xl text-[11px] font-bold text-white flex items-center gap-1 shadow-md transition active:scale-95 disabled:opacity-50"
+                      disabled={Boolean(isApplyingId)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSelectCandidate(cand);
+                      }}
+                      className="h-9 min-w-[74px] px-3 rounded-xl text-[11px] font-bold text-white flex items-center justify-center gap-1 shadow-md transition active:scale-95 disabled:opacity-50"
                       style={{ backgroundColor: themeColors.accent }}
                       title="Select & rewrite song with this match"
                     >
@@ -341,7 +360,7 @@ export const SyncSongModal: React.FC = () => {
                       ) : (
                         <Check className="w-3.5 h-3.5" />
                       )}
-                      <span>Select</span>
+                      <span>{isApplying ? 'Syncing' : 'Select'}</span>
                     </button>
                   </div>
                 </div>
