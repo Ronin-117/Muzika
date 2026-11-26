@@ -21,6 +21,7 @@ const STORAGE_KEYS = {
   LAST_DEFAULT_QUEUE_ID: 'muzika_last_default_queue_id',
   SONG_SYNC_OVERRIDES: 'muzika_song_sync_overrides',
   AUTO_RESUME_ON_CALL: 'muzika_auto_resume_on_call',
+  SKIP_NON_BG_SONGS: 'muzika_skip_non_bg_songs',
 };
 
 export const DEFAULT_EQUALIZER: EqualizerSettings = {
@@ -397,6 +398,20 @@ export class StorageService {
   static saveAutoResumeOnCall(enabled: boolean): void {
     try {
       localStorage.setItem(STORAGE_KEYS.AUTO_RESUME_ON_CALL, String(enabled));
+    } catch {}
+  }
+
+  static getSkipNonBgSongs(): boolean {
+    try {
+      return localStorage.getItem(STORAGE_KEYS.SKIP_NON_BG_SONGS) === 'true';
+    } catch {
+      return false;
+    }
+  }
+
+  static saveSkipNonBgSongs(enabled: boolean): void {
+    try {
+      localStorage.setItem(STORAGE_KEYS.SKIP_NON_BG_SONGS, String(enabled));
     } catch {}
   }
 

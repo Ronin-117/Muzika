@@ -44,7 +44,7 @@ export const SyncSongModal: React.FC = () => {
         title: syncTargetSong.title,
         artist: syncTargetSong.artist,
         vidId,
-        limit: 18,
+        limit: 22,
       });
       setCandidates(result.candidates);
       if (result.resolvedMeta) {
@@ -155,8 +155,8 @@ export const SyncSongModal: React.FC = () => {
               <h2 className="text-base font-extrabold truncate text-white leading-tight">
                 Sync Track Manually
               </h2>
-              <p className="text-[11px] opacity-60 truncate">
-                Test candidates & select the exact match to rewrite this song
+              <p className="text-[11px] opacity-65 truncate">
+                JioSaavn (BG &amp; Offline ready) shown first · Test &amp; Select
               </p>
             </div>
           </div>
@@ -305,10 +305,31 @@ export const SyncSongModal: React.FC = () => {
                         {cand.artist}
                         {cand.album ? ` · ${cand.album}` : ''}
                       </div>
-                      <div className="text-[10px] opacity-50 font-mono mt-0.5 flex items-center gap-1.5">
-                        <span>{formatDuration(cand.duration)}</span>
-                        <span>·</span>
-                        <span>{cand.source === 'stream' ? '320kbps Direct' : 'YouTube Track'}</span>
+                      <div className="text-[10px] font-mono mt-1 flex items-center gap-1.5 flex-wrap">
+                        <span className="opacity-55">{formatDuration(cand.duration)}</span>
+                        {cand.source === 'stream' ? (
+                          <>
+                            <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-sans font-bold leading-none">
+                              {cand.id.startsWith('saavn-') ? 'JioSaavn' : 'Direct Stream'}
+                            </span>
+                            <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-200/90 font-sans font-semibold leading-none">
+                              BG &amp; Offline OK
+                            </span>
+                          </>
+                        ) : cand.source === 'local' ? (
+                          <span className="px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-sans font-bold leading-none">
+                            Local · Offline OK
+                          </span>
+                        ) : (
+                          <>
+                            <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/25 font-sans font-bold leading-none">
+                              YouTube
+                            </span>
+                            <span className="px-1.5 py-0.5 rounded bg-white/5 text-white/55 font-sans font-medium leading-none">
+                              Iframe · No BG/Offline
+                            </span>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>

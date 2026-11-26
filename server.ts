@@ -926,29 +926,94 @@ app.get('/api/sync-candidates', async (req: Request, res: Response) => {
       return res.json({ resolvedMeta, candidates: [] });
     }
 
-    const candidates: any[] = [];
-    const seenKeys = new Set<string>();
-
-    // Include enriched oEmbed track as first candidate when vidId exists & not explicitly searching custom text
-    if (resolvedMeta && vidId && !customQuery) {
-      const key = `yt-${vidId}`;
-      seenKeys.add(key);
-      candidates.push({
-        id: key,
-        title: resolvedMeta.title || title,
-        artist: resolvedMeta.artist,
-        duration: 210,
-        thumbnailUrl: resolvedMeta.thumbnailUrl,
-        source: 'youtube',
-        youtubeId: vidId,
-        playCount: 0,
-      });
+    // Build prioritized JioSaavn search queries (supports cleaner title+artist variants alongside raw query)
+    const cleanResolvedArtist =
+      resolvedMeta?.artist && resolvedMeta.artist !== 'Unknown Artist' ? resolvedMeta.artist : '';
+    const effectiveTitle = title || resolvedMeta?.title || '';
+    const effectiveArtist = !isArtistUnknown ? artist : cleanResolvedArtist;
+    const saavnQueryList: string[] = [];
+    const pushSaavnQ = (q: string) => {
+      const cleaned = q.replace(/\s+/g, ' ').trim();
+      if (cleaned && !saavnQueryList.some((existing) => existing.toLowerCase() === cleaned.toLowerCase())) {
+        saavnQueryList.push(cleaned);
+      }
+    };
+    if (customQuery) {
+      pushSaavnQ(customQuery);
+      const strippedCustom = customQuery.replace(/\([^)]*\)|\[[^\]]*\]/g, ' ');
+      pushSaavnQ(strippedCustom);
+    } else {
+      pushSaavnQ(searchQuery);
+      if (effectiveTitle) {
+        for (const variant of buildStreamSearchQueries(effectiveTitle, effectiveArtist)) {
+          pushSaavnQ(variant);
+        }
+      }
     }
 
-    // Search YouTube Music songs + videos & JioSaavn 320kbps in parallel
-    const [ytResults, saavnResults] = await Promise.all([
+    // Search JioSaavn 320kbps (BG & offline playable) and YouTube Music songs + videos in parallel
+    const [saavnResults, ytResults] = await Promise.all([
       (async () => {
         const list: any[] = [];
+        const seenSaavnIds = new Set<string>();
+        for (const qVariant of saavnQueryList.slice(0, 2)) {
+          if (list.length >= 10) break;
+          try {
+            const resp = await fetch(
+              `https://saavn-api-one.vercel.app/search/songs?query=${encodeURIComponent(qVariant)}`,
+              { signal: AbortSignal.timeout(3500) }
+            );
+            if (resp.ok) {
+              const data: any = await resp.json();
+              const hits = data.data?.results || data.results || [];
+              for (const hit of hits.slice(0, 10)) {
+                if (!hit?.downloadUrl || !hit?.id || seenSaavnIds.has(String(hit.id))) continue;
+                const downloadObj =
+                  hit.downloadUrl.find((d: any) => d.quality === '320kbps') ||
+                  hit.downloadUrl[hit.downloadUrl.length - 1];
+                const directLink = downloadObj?.link || downloadObj?.url;
+                if (!directLink) continue;
+
+                seenSaavnIds.add(String(hit.id));
+                const imgObj =
+                  hit.image?.[hit.image.length - 1] || hit.image?.[0];
+                const thumbUrl = imgObj?.link || imgObj?.url || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&q=80';
+                list.push({
+                  id: `saavn-${hit.id}`,
+                  title: decodeHtmlEntities(hit.name || 'Untitled Song'),
+                  artist: extractSaavnArtistText(hit) || 'Unknown Artist',
+                  album: hit.album?.name ? decodeHtmlEntities(hit.album.name) : undefined,
+                  duration: Number(hit.duration) || 210,
+                  thumbnailUrl: thumbUrl,
+                  source: 'stream',
+                  streamUrl: directLink,
+                  year: hit.year || undefined,
+                  playCount: 0,
+                });
+                if (list.length >= 10) break;
+              }
+            }
+          } catch {
+            // ignore and try next query variant
+          }
+        }
+        return list;
+      })(),
+      (async () => {
+        const list: any[] = [];
+        // Include enriched oEmbed track as a YouTube candidate when vidId exists & not searching custom text
+        if (resolvedMeta && vidId && !customQuery) {
+          list.push({
+            id: `yt-${vidId}`,
+            title: resolvedMeta.title || title,
+            artist: resolvedMeta.artist,
+            duration: 210,
+            thumbnailUrl: resolvedMeta.thumbnailUrl,
+            source: 'youtube',
+            youtubeId: vidId,
+            playCount: 0,
+          });
+        }
         try {
           const yt = await getInnertube();
           const songRes = await yt.music.search(searchQuery, { type: 'song' });
@@ -1001,54 +1066,26 @@ app.get('/api/sync-candidates', async (req: Request, res: Response) => {
         }
         return list;
       })(),
-      (async () => {
-        const list: any[] = [];
-        try {
-          const resp = await fetch(
-            `https://saavn-api-one.vercel.app/search/songs?query=${encodeURIComponent(searchQuery)}`,
-            { signal: AbortSignal.timeout(3500) }
-          );
-          if (resp.ok) {
-            const data: any = await resp.json();
-            const hits = data.data?.results || data.results || [];
-            for (const hit of hits.slice(0, 6)) {
-              if (!hit?.downloadUrl) continue;
-              const downloadObj =
-                hit.downloadUrl.find((d: any) => d.quality === '320kbps') ||
-                hit.downloadUrl[hit.downloadUrl.length - 1];
-              const directLink = downloadObj?.link || downloadObj?.url;
-              if (!directLink) continue;
-
-              const imgObj =
-                hit.image?.[hit.image.length - 1] || hit.image?.[0];
-              const thumbUrl = imgObj?.link || imgObj?.url || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&q=80';
-              list.push({
-                id: `saavn-${hit.id}`,
-                title: decodeHtmlEntities(hit.name || 'Untitled Song'),
-                artist: extractSaavnArtistText(hit) || 'Unknown Artist',
-                album: hit.album?.name ? decodeHtmlEntities(hit.album.name) : undefined,
-                duration: Number(hit.duration) || 210,
-                thumbnailUrl: thumbUrl,
-                source: 'stream',
-                streamUrl: directLink,
-                year: hit.year || undefined,
-                playCount: 0,
-              });
-            }
-          }
-        } catch {
-          // ignore
-        }
-        return list;
-      })(),
     ]);
 
-    for (const item of [...ytResults, ...saavnResults]) {
+    // Always place BG & offline playable JioSaavn 320kbps matches first, then YouTube results
+    const maxSaavnSlots = ytResults.length > 0 ? Math.min(10, Math.max(6, limit - 4)) : limit;
+    const candidates: any[] = [];
+    const seenKeys = new Set<string>();
+
+    for (const item of saavnResults.slice(0, maxSaavnSlots)) {
       if (!seenKeys.has(item.id)) {
         seenKeys.add(item.id);
         candidates.push(item);
       }
+    }
+
+    for (const item of ytResults) {
       if (candidates.length >= limit) break;
+      if (!seenKeys.has(item.id)) {
+        seenKeys.add(item.id);
+        candidates.push(item);
+      }
     }
 
     return res.json({

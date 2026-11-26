@@ -23,6 +23,7 @@ import {
   FileDown,
   ListMusic,
   PhoneCall,
+  SkipForward,
 } from 'lucide-react';
 import { StorageService } from '../../services/storageService';
 import { usePWAInstall } from '../../hooks/usePWAInstall';
@@ -49,6 +50,8 @@ export const SettingsScreen: React.FC = () => {
     setEnableMultipleQueues,
     autoResumeOnCall,
     setAutoResumeOnCall,
+    skipNonBgSongs,
+    setSkipNonBgSongs,
     showToast,
   } = useMusic();
   const { isInstalled } = usePWAInstall();
@@ -254,6 +257,31 @@ export const SettingsScreen: React.FC = () => {
               <div
                 className={`w-5 h-5 rounded-full bg-white transition-transform ${
                   autoResumeOnCall ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between p-3.5">
+            <div className="flex items-center gap-3 pr-3">
+              <SkipForward className="w-5 h-5 opacity-70 shrink-0" />
+              <div>
+                <div className="text-sm font-semibold">Skip Non-Background Songs</div>
+                <div className="text-xs opacity-50">
+                  Auto-skip YouTube iframe-only tracks without a direct stream so background playback never stops
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={() => setSkipNonBgSongs(!skipNonBgSongs)}
+              aria-label="Toggle skip non-background songs"
+              className={`w-11 h-6 rounded-full transition-colors relative flex items-center p-0.5 shrink-0 cursor-pointer ${
+                skipNonBgSongs ? 'bg-emerald-500' : 'bg-white/10'
+              }`}
+            >
+              <div
+                className={`w-5 h-5 rounded-full bg-white transition-transform ${
+                  skipNonBgSongs ? 'translate-x-5' : 'translate-x-0'
                 }`}
               />
             </button>

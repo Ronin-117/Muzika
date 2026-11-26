@@ -170,6 +170,10 @@ interface MusicContextType {
   autoResumeOnCall: boolean;
   setAutoResumeOnCall: (enabled: boolean) => void;
 
+  // Skip non-background-playable (YouTube IFrame fallback) tracks (Default OFF)
+  skipNonBgSongs: boolean;
+  setSkipNonBgSongs: (enabled: boolean) => void;
+
   // User collections
   likedSongs: Song[];
   toggleLike: (song: Song) => void;
@@ -757,6 +761,11 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [autoResumeOnCall, setAutoResumeOnCallState] = useState<boolean>(() => StorageService.getAutoResumeOnCall());
   const autoResumeOnCallRef = useRef<boolean>(autoResumeOnCall);
   autoResumeOnCallRef.current = autoResumeOnCall;
+
+  // Skip Non-Background-Playable (IFrame-only) Songs (Default OFF)
+  const [skipNonBgSongs, setSkipNonBgSongsState] = useState<boolean>(() => StorageService.getSkipNonBgSongs());
+  const skipNonBgSongsRef = useRef<boolean>(skipNonBgSongs);
+  skipNonBgSongsRef.current = skipNonBgSongs;
 
   // Multiple Queues feature (Toggleable in Settings)
   const [enableMultipleQueues, setEnableMultipleQueuesState] = useState<boolean>(() => startupQueueResolution.enableMultipleQueues);
@@ -1372,6 +1381,8 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   queueIndexRef.current = queueIndex;
   const repeatModeRef = useRef<RepeatMode>(repeatMode);
   repeatModeRef.current = repeatMode;
+  const isShuffleRef = useRef<boolean>(isShuffle);
+  isShuffleRef.current = isShuffle;
   const isPlayingRef = useRef<boolean>(isPlaying);
   isPlayingRef.current = isPlaying;
   const userPausedRef = useRef<boolean>(false);
@@ -1396,7 +1407,13 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const seekToRef = useRef<(seconds: number) => void>(() => {});
   const handleTrackEndedRef = useRef<() => void>(() => {});
   const playIndexRef = useRef<
-    (index: number, startAtSecond?: number, overrideQueue?: Song[], overrideSong?: Song) => Promise<void>
+    (
+      index: number,
+      startAtSecond?: number,
+      overrideQueue?: Song[],
+      overrideSong?: Song,
+      skipCtx?: { direction: 1 | -1; visited: number[]; skippedCount: number }
+    ) => Promise<void>
   >(async () => {});
 
   const assertPausedMediaSessionState = () => {
@@ -1516,6 +1533,18 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     if (!enabled) {
       clearInterruptionState();
     }
+  };
+
+  const setSkipNonBgSongs = (enabled: boolean) => {
+    hapticFeedback();
+    setSkipNonBgSongsState(enabled);
+    skipNonBgSongsRef.current = enabled;
+    StorageService.saveSkipNonBgSongs(enabled);
+    showToast(
+      enabled
+        ? 'Skipping non-background songs enabled'
+        : 'Skipping non-background songs disabled'
+    );
   };
 
   useEffect(() => {
@@ -2322,9 +2351,17 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     }
 
     if (curIndex < curQueue.length - 1) {
-      playIndexRef.current(curIndex + 1);
+      playIndexRef.current(curIndex + 1, 0, undefined, undefined, {
+        direction: 1,
+        visited: [],
+        skippedCount: 0,
+      });
     } else if (curRepeat === 'all') {
-      playIndexRef.current(0);
+      playIndexRef.current(0, 0, undefined, undefined, {
+        direction: 1,
+        visited: [],
+        skippedCount: 0,
+      });
     } else {
       setIsPlaying(false);
     }
@@ -2374,7 +2411,13 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     );
   };
 
-  const playIndex = async (index: number, startAtSecond?: number, overrideQueue?: Song[], overrideSong?: Song) => {
+  const playIndex = async (
+    index: number,
+    startAtSecond?: number,
+    overrideQueue?: Song[],
+    overrideSong?: Song,
+    skipCtx?: { direction: 1 | -1; visited: number[]; skippedCount: number }
+  ) => {
     stopPreviewCandidate();
     if (preloadTimerRef.current) {
       window.clearTimeout(preloadTimerRef.current);
@@ -2389,8 +2432,14 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
     // Check blacklist: if blacklisted, try skip to next
     if (isBlacklisted(song)) {
-      if (index + 1 < activeQueue.length) {
-        playIndex(index + 1, 0, activeQueue);
+      const blVisited = new Set<number>(skipCtx?.visited || []);
+      blVisited.add(index);
+      if (index + 1 < activeQueue.length && !blVisited.has(index + 1)) {
+        playIndex(index + 1, 0, activeQueue, undefined, {
+          direction: skipCtx?.direction ?? 1,
+          visited: Array.from(blVisited),
+          skippedCount: skipCtx?.skippedCount ?? 0,
+        });
         return;
       }
     }
@@ -2433,7 +2482,6 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     setCurrentTime(startPos);
     setDuration(song.duration || 180);
     setIsPlaying(true);
-    recordPlay(song);
 
     // Check if track has a cached real audio blob in IndexedDB
     const cachedData = await offlineCacheService.getCachedTrackAudioUrl(song.id);
@@ -2463,6 +2511,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
     // 1. If cached real audio is available, play via native HTML5 <audio>
     if (cachedData && cachedData.audioUrl) {
+      recordPlay(song);
       activeEngineRef.current = 'html';
       lastBlobUrlRef.current = cachedData.audioUrl;
       if (cachedData.coverUrl) {
@@ -2495,6 +2544,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
       isTransitioningRef.current = false;
       if (directStreamUrl && htmlAudioRef.current) {
+        recordPlay(song);
         activeEngineRef.current = 'html';
         if (ytControllerRef.current) ytControllerRef.current.pause();
         htmlAudioRef.current.src = directStreamUrl;
@@ -2506,7 +2556,59 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         htmlAudioRef.current.play().catch(() => {});
         silentKeepAliveRef.current?.play().catch(() => {});
       } else {
-        // 3. Fallback: YouTube iframe engine
+        // 3. Fallback: YouTube iframe engine (no direct stream; won't continue in background)
+        if (skipNonBgSongsRef.current) {
+          const dir: 1 | -1 = skipCtx?.direction ?? 1;
+          const visitedSet = new Set<number>(skipCtx?.visited || []);
+          visitedSet.add(index);
+
+          let nextIdx = -1;
+          if (isShuffleRef.current && activeQueue.length > 1) {
+            const unvisited: number[] = [];
+            for (let idxCand = 0; idxCand < activeQueue.length; idxCand++) {
+              if (!visitedSet.has(idxCand)) unvisited.push(idxCand);
+            }
+            if (unvisited.length > 0) {
+              nextIdx = unvisited[Math.floor(Math.random() * unvisited.length)];
+            }
+          } else if (dir === 1) {
+            if (index + 1 < activeQueue.length && !visitedSet.has(index + 1)) {
+              nextIdx = index + 1;
+            } else if (repeatModeRef.current === 'all' && activeQueue.length > 0 && !visitedSet.has(0)) {
+              nextIdx = 0;
+            }
+          } else {
+            if (index - 1 >= 0 && !visitedSet.has(index - 1)) {
+              nextIdx = index - 1;
+            } else if (
+              repeatModeRef.current === 'all' &&
+              activeQueue.length > 0 &&
+              !visitedSet.has(activeQueue.length - 1)
+            ) {
+              nextIdx = activeQueue.length - 1;
+            }
+          }
+
+          if (nextIdx !== -1 && (skipCtx?.skippedCount ?? 0) < activeQueue.length) {
+            showToast(`Skipped "${song.title}" (not BG playable)`);
+            await playIndex(nextIdx, 0, activeQueue, undefined, {
+              direction: dir,
+              visited: Array.from(visitedSet),
+              skippedCount: (skipCtx?.skippedCount ?? 0) + 1,
+            });
+            return;
+          }
+
+          activeEngineRef.current = 'html';
+          if (ytControllerRef.current) ytControllerRef.current.pause();
+          silentKeepAliveRef.current?.pause();
+          audioFocusManager.stop();
+          setIsPlaying(false);
+          showToast('No background-playable songs remaining in queue');
+          return;
+        }
+
+        recordPlay(song);
         activeEngineRef.current = 'youtube';
         if (htmlAudioRef.current) {
           htmlAudioRef.current.pause();
@@ -2713,13 +2815,14 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const nextTrack = () => {
     hapticFeedback();
     if (queue.length === 0) return;
+    const fwdCtx = { direction: 1 as const, visited: [], skippedCount: 0 };
     if (isShuffle) {
       const randomIndex = Math.floor(Math.random() * queue.length);
-      playIndex(randomIndex);
+      playIndex(randomIndex, 0, undefined, undefined, fwdCtx);
     } else if (queueIndex < queue.length - 1) {
-      playIndex(queueIndex + 1);
+      playIndex(queueIndex + 1, 0, undefined, undefined, fwdCtx);
     } else if (repeatMode === 'all') {
-      playIndex(0);
+      playIndex(0, 0, undefined, undefined, fwdCtx);
     }
   };
   nextTrackRef.current = nextTrack;
@@ -2731,7 +2834,11 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       return;
     }
     if (queueIndex > 0) {
-      playIndex(queueIndex - 1);
+      playIndex(queueIndex - 1, 0, undefined, undefined, {
+        direction: -1,
+        visited: [],
+        skippedCount: 0,
+      });
     } else {
       seekTo(0);
     }
@@ -3925,7 +4032,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       title: song.title,
       artist: song.artist,
       vidId,
-      limit: 15,
+      limit: 20,
     });
 
     const bestMatch = OnlineMusicService.pickBestSyncMatch(song, candidates, resolvedMeta);
@@ -4084,6 +4191,8 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           addPlaylistToQueue,
           autoResumeOnCall,
           setAutoResumeOnCall,
+          skipNonBgSongs,
+          setSkipNonBgSongs,
         }}
       >
         {children}

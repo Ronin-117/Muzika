@@ -440,6 +440,19 @@ export class OnlineMusicService {
     const titleTokens = targetTitle.split(' ').filter((t) => t.length > 1);
     const artistTokens = targetArtist.split(' ').filter((t) => t.length > 1);
 
+    const modifierWords = [
+      'instrumental',
+      'karaoke',
+      'lofi',
+      'slowed',
+      'reverb',
+      'remix',
+      '8d',
+      'sped up',
+      'nightcore',
+      'ringtone',
+    ];
+
     let best: Song | null = null;
     let bestScore = -Infinity;
 
@@ -451,16 +464,29 @@ export class OnlineMusicService {
       const combined = `${cTitle} ${cArtist} ${cAlbum}`;
 
       let score = 0;
+      let titleScore = 0;
+      let hasArtistMismatch = false;
+      let hasModifierMismatch = false;
 
       // Prefer earlier search rank slightly as tie-breaker
       score += Math.max(0, 10 - i * 0.5);
 
       // Title match
-      if (targetTitle && cTitle === targetTitle) score += 40;
-      else if (targetTitle && (cTitle.includes(targetTitle) || targetTitle.includes(cTitle))) score += 25;
+      if (targetTitle && cTitle === targetTitle) titleScore += 40;
+      else if (targetTitle && (cTitle.includes(targetTitle) || targetTitle.includes(cTitle))) titleScore += 25;
       if (titleTokens.length > 0) {
         const matchedTitleTokens = titleTokens.filter((t) => cTitle.includes(t)).length;
-        score += (matchedTitleTokens / titleTokens.length) * 30;
+        titleScore += (matchedTitleTokens / titleTokens.length) * 30;
+      }
+      score += titleScore;
+
+      // Modifier mismatch guard (avoid picking karaoke/lofi/ringtone over studio audio)
+      for (const mod of modifierWords) {
+        if (cTitle.includes(mod) && !targetTitle.includes(mod)) {
+          score -= 40;
+          hasModifierMismatch = true;
+          break;
+        }
       }
 
       // Artist match (critical)
@@ -471,20 +497,11 @@ export class OnlineMusicService {
         } else {
           // Artist mismatch penalty!
           score -= 45;
+          hasArtistMismatch = true;
         }
       } else if (cand.artist && cand.artist !== 'Unknown Artist') {
         // Bonus when original had Unknown Artist and candidate gives real artist metadata
         score += 15;
-      }
-
-      // Avoid selecting the exact broken source unless it gained real artist metadata from oEmbed
-      if (
-        originalSong.youtubeId &&
-        cand.youtubeId === originalSong.youtubeId &&
-        !origIsUnknown
-      ) {
-        // Slightly prefer alternative clean match if user explicitly hit Auto Sync because playback seemed off
-        score -= 5;
       }
 
       // Duration closeness
@@ -492,6 +509,20 @@ export class OnlineMusicService {
         const diff = Math.abs(originalSong.duration - cand.duration);
         if (diff <= 10) score += 10;
         else if (diff > 35) score -= 15;
+      }
+
+      // Strong priority for BG & offline-playable direct stream sources (JioSaavn 320kbps) when match is genuine
+      const isDirectBgPlayable = cand.source === 'stream' && Boolean(cand.streamUrl);
+      const titleQualified = !targetTitle || titleScore >= 20;
+      if (isDirectBgPlayable && !hasArtistMismatch && !hasModifierMismatch && titleQualified) {
+        score += 45;
+      } else if (
+        originalSong.youtubeId &&
+        cand.youtubeId === originalSong.youtubeId &&
+        !origIsUnknown
+      ) {
+        // Slightly prefer alternative clean match if user explicitly hit Auto Sync because playback seemed off
+        score -= 5;
       }
 
       if (score > bestScore) {
